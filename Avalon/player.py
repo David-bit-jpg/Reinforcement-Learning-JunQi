@@ -594,10 +594,13 @@ class Player:
         first_order_prompt = (
             f"You are Player {self.player_id} with role {self.role}. {'As the leader, ' if is_leader else ''}"
             f"debate about the proposed team of {team_size} players: {proposed_team}. Reflect on the team composition, the leader's reasons for choosing this team, and make inferences about the identities of other players based on the proposed team and their behaviors so far. "
-            f"Consider the previous statements: {previous_statements}. "
+            f"Consider the previous statements: {previous_statements}, this is very important. "
             f"Remember, your identity should not be easily revealed. Evil players should try to gain trust by appearing good, while good players should try to identify other good players. "
             f"Your debate statements will be seen and recorded by all players, so be cautious. "
             f"Here's your memory for reference {self.filter_memory()}"
+            f"Discuss and analyze the {previous_statements}, try to deduct their identity based on their statements."
+            f"Feel free to deceive other players in this gaming environment."
+            f"You may know your goal but all you say is for other players and they will remember it. So, be careful and try to deceive them and hide your goal."
             f"Generate an initial formulation of your debate content."
         )
         first_order_response = self.generate_response(first_order_prompt)
@@ -651,6 +654,10 @@ class Player:
                 f"- Try to include other evil players if you are the leader.\n"
                 f"- Support other evil players subtly by validating their points and casting doubt on good players.\n"
                 f"- Work on identifying Mordred by observing players' behaviors and statements.\n"
+                f"- Never expose your identity."
+                f"- Never expose your identity."
+                f"- Never expose your identity."
+                f"- Never expose your identity. You can choose a good identity from ['Merlin', 'Percival', 'Loyal Servant'] to pretend.\n"
                 f"Limit your response to 50 words."
             )
 

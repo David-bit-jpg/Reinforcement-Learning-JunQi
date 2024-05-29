@@ -68,12 +68,12 @@ class AvalonGame:
         self.debate_history.append(f"Player {leader.player_id} (Leader): {leader_statement}")
         
         # other players
-        debate_feedback = [leader_statement]
+        debate_feedback = [f"Player {leader.player_id} (Leader): {leader_statement}"]
         for other_player in self.players:
             if other_player.player_id != leader.player_id:
                 statement = other_player.debate(proposed_team, previous_statements=debate_feedback)
                 self.debate_history.append(f"Player {other_player.player_id}: {statement}")
-                debate_feedback.append(statement)
+                debate_feedback.append(f"Player {other_player.player_id}: {statement}")
                 for player in self.players:
                     player.remember(f"Player {other_player.player_id}: {statement}")
 
@@ -83,6 +83,7 @@ class AvalonGame:
         for player in self.players:
             player.remember(f"Leader {leader.player_id} finalizes the team: {final_team}")
         return final_team
+
 
     def vote_for_team(self, leader, team):
         votes = {player.player_id: player.vote_for_team(team) if player.player_id != leader.player_id else 'Approve' for player in self.players}
