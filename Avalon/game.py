@@ -41,9 +41,7 @@ class AvalonGame:
 
     def nominate_team(self, leader, team_size):
         team = leader.nominate_team(team_size)
-        proposal_explanation = leader.explain_proposal(team)
-        detailed_explanation = leader.generate_response('Explain why you chose this team.')
-        self.history.append(f"<b>Leader {leader.player_id} nominates team: {team}</b> - {proposal_explanation} - Reason: {detailed_explanation}")
+        self.history.append(f"<b>Leader {leader.player_id} nominates team: {team}</b>")
         for player in self.players:
             player.remember(f"Leader {leader.player_id} nominates team: {team}")
         return team

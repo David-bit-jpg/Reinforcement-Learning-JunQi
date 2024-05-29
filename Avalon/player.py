@@ -164,6 +164,7 @@ class Player:
             f"2. Role Alignment: Evaluate whether your THINK and SPEAK contents align well with your role {self.role} in the current game state.\n"
             f"3. Strategy Reevaluation: Consider what changes could be made to your THINK and SPEAK contents to improve your chances of winning as {self.role}.\n"
             f"4. Public and Private Content: Remember that THINK contents are private, while SPEAK contents are publicly visible. Strategize accordingly."
+            f"Limit your response in 50 words"
         )
         refinement_response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo-0301",
@@ -188,7 +189,7 @@ class Player:
             f"You are {'evil' if self.role in ['Assassin', 'Mordred', 'Morgana'] else 'good'}. "
             f"Your known evil players are: {self.known_evil}. Your known Merlin and Morgana (if any) are: {self.is_merlin_known_by}. "
             f"Try your best to hide your identity if you are evil, or confirm others to believe you are good. "
-            f"This is part of your memory: {filtered_memory}. Limit your response to two sentences."
+            f"This is part of your memory: {filtered_memory}."
         )
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo-0301",
@@ -204,7 +205,7 @@ class Player:
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial response: {initial_response}. "
             f"Consider how other players (both good and evil) might perceive your response. "
-            f"Revise your response to ensure your role and intentions remain concealed or properly presented. Limit your response to two sentences."
+            f"Revise your response to ensure your role and intentions remain concealed or properly presented."
         )
         perspective_response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo-0301",
@@ -218,7 +219,8 @@ class Player:
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial response and others' perspective: {other_players_perspective}. "
-            f"Now refine your response to ensure your role and intentions remain concealed or properly presented. Limit your response to two sentences."
+            f"Now refine your response to ensure your role and intentions remain concealed or properly presented."
+            f"Limit your response in 50 words"
         )
         refinement_response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo-0301",
@@ -335,6 +337,7 @@ class Player:
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial discussion and others' perspective: {other_players_perspective}. "
             f"Now refine your discussion to ensure your role and intentions remain concealed or properly presented."
+            f"Limit your response in 50 words"
         )
         refinement_response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo-0301",
@@ -355,7 +358,7 @@ class Player:
             f"2. Review how players have contributed to past Quests.\n"
             f"3. Evaluate any behavior that appears either suspicious or trustworthy.\n"
             f"Then clearly state '[approve]' or '[reject]'.\n"
-            f"Be honest about your reasons, even if it reveals your identity. Only your final decision will be remembered by other players and yourself for future reasoning. Limit your response to two sentences."
+            f"Be honest about your reasons, even if it reveals your identity. Only your final decision will be remembered by other players and yourself for future reasoning."
         )
         if self.role in ['Assassin', 'Mordred', 'Morgana']:
             specific_prompt = (
@@ -394,6 +397,7 @@ class Player:
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial vote and others' perspective: {other_players_perspective}. "
             f"Now refine your vote to ensure your role and intentions remain concealed or properly presented."
+            f"Limit your response in 50 words"
         )
         refinement_response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo-0301",
@@ -456,6 +460,7 @@ class Player:
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial vote and others' perspective: {other_players_perspective}. "
             f"Now refine your vote to ensure your role and intentions remain concealed or properly presented."
+            f"Limit your response in 50 words"
         )
         refinement_response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo-0301",
@@ -481,6 +486,7 @@ class Player:
             f"2. Review how players have contributed to past Quests.\n"
             f"3. Combine with your previous guesses about other players.\n"
             f"Then state your guess by providing a Player ID, like 'Player 2'."
+            f"Limit your response in 50 words"
         )
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo-0301",
@@ -498,88 +504,84 @@ class Player:
             messages=[
                 {"role": "system", "content": "You are an Avalon player."},
                 {"role": "user", "content": prompt}
-            ]
+            ],
         )
         return response.choices[0].message['content']
 
     def debate(self, proposed_team, is_leader=False):
-        # (Formulation Contemplation)
         first_order_prompt = (
             f"You are Player {self.player_id} with role {self.role}. {'As the leader, ' if is_leader else ''}"
             f"debate about the proposed team: {proposed_team}. Reflect on the team composition, the leader's reasons for choosing this team, and make inferences about the identities of other players based on the proposed team and their behaviors so far. "
-            "Remember, your identity should not be easily revealed. Evil players should try to gain trust by appearing good, while good players should try to identify other good players. "
-            "Your debate statements will be seen and recorded by all players, so be cautious. "
-            "Generate an initial formulation of your debate content."
+            f"Remember, your identity should not be easily revealed. Evil players should try to gain trust by appearing good, while good players should try to identify other good players. "
+            f"Your debate statements will be seen and recorded by all players, so be cautious to hide your identity. "
+            f"Remember: Exposing your role can lead to losing the game. Try to deduce others' roles and record any hints you observe."
         )
         first_order_response = self.generate_response(first_order_prompt)
         
-        # (First-order Perspective Transition)
         first_order_perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial debate thoughts: {first_order_response}. "
-            f"Analyze how your original debate content might be interpreted by other game roles. Reflect on whether it may inadvertently reveal your role-specific clues."
+            f"Analyze how your original debate content might be interpreted by other game roles. Reflect on whether it may inadvertently reveal your role-specific clues. "
         )
         first_order_perspective_response = self.generate_response(first_order_perspective_prompt)
         
-        # (Refinement Contemplation)
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial debate thoughts and others' perspective: {first_order_perspective_response}. "
-            f"Now refine your debate content to ensure your role and intentions remain concealed or properly presented."
+            f"Now refine your debate content to ensure your role and intentions remain concealed or properly presented. "
+            f"Limit your response to 50 words."
         )
         refined_debate_response = self.generate_response(refinement_prompt)
         
         return refined_debate_response
 
+
     def explain_proposal(self, proposed_team):
-        # (Formulation Contemplation)
         first_order_prompt = (
             f"You are Player {self.player_id} with role {self.role}. Explain why you propose the team: {proposed_team}. "
-            "Reflect on the reasons for choosing this team and how it aligns with your role's objectives. "
-            "Your explanation will be seen and recorded by all players, so be cautious. "
-            "Generate an initial formulation of your explanation."
+            f"Reflect on the reasons for choosing this team and how it aligns with your role's objectives. "
+            f"Your explanation will be seen and recorded by all players, so be cautious. "
+            f"Remember: Exposing your role can lead to losing the game. Try to deduce others' roles and record any hints you observe."
         )
         first_order_response = self.generate_response(first_order_prompt)
         
-        # (First-order Perspective Transition)
         first_order_perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial explanation: {first_order_response}. "
-            f"Analyze how your original explanation might be interpreted by other game roles. Reflect on whether it may inadvertently reveal your role-specific clues."
+            f"Analyze how your original explanation might be interpreted by other game roles. Reflect on whether it may inadvertently reveal your role-specific clues. "
         )
         first_order_perspective_response = self.generate_response(first_order_perspective_prompt)
         
-        # (Refinement Contemplation)
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial explanation and others' perspective: {first_order_perspective_response}. "
-            f"Now refine your explanation to ensure your role and intentions remain concealed or properly presented."
+            f"Now refine your explanation to ensure your role and intentions remain concealed or properly presented. "
+            f"Limit your response to 50 words."
         )
         refined_explanation_response = self.generate_response(refinement_prompt)
         
         return refined_explanation_response
 
+
     def finalize_team(self, initial_team, debate_feedback):
-        # (Formulation Contemplation)
         first_order_prompt = (
             f"You are Player {self.player_id} with role {self.role}. Finalize your proposed team after the debate. "
             f"Initial team: {initial_team}. Consider the feedback received during the debate: {debate_feedback}. "
-            "Your final decision on the team composition will be seen and recorded by all players, so be cautious. "
-            "Generate an initial formulation of your final decision."
+            f"Your final decision on the team composition will be seen and recorded by all players, so be cautious. "
+            f"Remember: You must include yourself in the final team composition."
         )
         first_order_response = self.generate_response(first_order_prompt)
         
-        # (First-order Perspective Transition)
         first_order_perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial final decision: {first_order_response}. "
-            f"Analyze how your original final decision might be interpreted by other game roles. Reflect on whether it may inadvertently reveal your role-specific clues."
+            f"Analyze how your original final decision might be interpreted by other game roles. Reflect on whether it may inadvertently reveal your role-specific clues. "
         )
         first_order_perspective_response = self.generate_response(first_order_perspective_prompt)
         
-        # (Refinement Contemplation)
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial final decision and others' perspective: {first_order_perspective_response}. "
-            f"Now refine your final decision to ensure your role and intentions remain concealed or properly presented."
+            f"Now refine your final decision to ensure your role and intentions remain concealed or properly presented. "
+            f"Limit your response to 50 words."
         )
         refined_final_response = self.generate_response(refinement_prompt)
         
         final_team = [int(x) for x in refined_final_response.split() if x.isdigit()]
-        if len(final_team) != len(initial_team):
+        if len(final_team) != len(initial_team) or self.player_id not in final_team:
             final_team = initial_team
         return final_team
