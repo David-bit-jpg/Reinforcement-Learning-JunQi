@@ -23,21 +23,34 @@ class AvalonGame:
             self.history.append(f"Player {player.player_id} is assigned the role {player.role}")
 
         evil_players = [player for player in self.players if player.role in ['Assassin', 'Mordred', 'Morgana']]
-        for player in self.players:
-            if player.role in ['Assassin', 'Mordred', 'Morgana']:
-                player.set_known_evil([ep.player_id for ep in evil_players if ep.player_id != player.player_id])
-
+        good_players = [player for player in self.players if player.role in ['Merlin', 'Percival', 'Loyal Servant']]
+        
+        # Set known evil players for Merlin (excluding Mordred)
         try:
             merlin = next(player for player in self.players if player.role == 'Merlin')
-            merlin.set_known_evil([ep.player_id for ep in evil_players if ep.role != 'Mordred'])
+            merlin_known_evil = [ep.player_id for ep in evil_players if ep.role != 'Mordred']
+            merlin.set_known_evil(merlin_known_evil)
+            merlin.remember(f"As Merlin, you know the evil players are: {merlin_known_evil}, but you do not know Mordred.")
         except StopIteration:
             pass
 
+        # Set known evil players for evil roles
+        for player in self.players:
+            if player.role in ['Assassin', 'Mordred', 'Morgana']:
+                known_evil = [ep.player_id for ep in evil_players if ep.player_id != player.player_id]
+                player.set_known_evil(known_evil)
+                player.remember(f"As {player.role}, you know the other evil players are: {known_evil}.")
+
+        # Set known Merlin/Morgana for Percival
         try:
             percival = next(player for player in self.players if player.role == 'Percival')
-            percival.set_merlin_known_by([p.player_id for p in self.players if p.role in ['Merlin', 'Morgana']])
+            percival_known = [p.player_id for p in self.players if p.role in ['Merlin', 'Morgana']]
+            percival.set_merlin_known_by(percival_known)
+            percival.remember(f"As Percival, you know Merlin and Morgana are: {percival_known}. You need to figure out who is who.")
         except StopIteration:
             pass
+
+
 
     def nominate_team(self, leader, team_size):
         team = leader.nominate_team(team_size)
@@ -58,13 +71,13 @@ class AvalonGame:
         debate_feedback = [leader_statement]
         for other_player in self.players:
             if other_player.player_id != leader.player_id:
-                statement = other_player.debate(proposed_team)
+                statement = other_player.debate(proposed_team, previous_statements=debate_feedback)
                 self.debate_history.append(f"Player {other_player.player_id}: {statement}")
                 debate_feedback.append(statement)
                 for player in self.players:
                     player.remember(f"Player {other_player.player_id}: {statement}")
 
-        # Leader comfirm final team choice
+        # Leader confirm final team choice
         final_team = leader.finalize_team(proposed_team, debate_feedback)
         self.history.append(f"<b>Leader {leader.player_id} finalizes the team: {final_team}</b>")
         for player in self.players:
