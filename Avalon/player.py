@@ -475,11 +475,11 @@ class Player:
             f"3. Evaluate any behavior that appears either suspicious or trustworthy.\n"
             f"Then clearly vote [success] or [fail], making your stance unambiguous. Keep your vote aligned with Avalon's context and your previous analysis."
             f"Here's your memory for reference {self.filter_memory()}"
-            f"Limit your response to 50 words"
+            f"Limit your response to 50 words."
         )
 
         if self.role in ['Merlin', 'Percival', 'Loyal Servant']:
-            specific_prompt = (
+            refinement_prompt = (
                 f"\nRemember: Always vote for success. Ensure the quest succeeds to help the good team."
             )
         elif self.role in ['Assassin', 'Morgana', 'Mordred']:
@@ -552,7 +552,6 @@ class Player:
         final_vote = refinement_response.choices[0].message['content']
 
         return final_vote
-
 
     def execute_quest(self):
         prompt = self.quest_vote_prompt()
