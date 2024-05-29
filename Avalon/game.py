@@ -9,12 +9,12 @@ class AvalonGame:
         self.roles = ['Merlin', 'Percival', 'Loyal Servant', 'Loyal Servant', 'Assassin', 'Mordred', 'Morgana']
         random.shuffle(self.roles)
         self.history = []
-        self.assign_roles()
         self.current_quest = 1
         self.quest_results = []
         self.debate_history = []
         self.inner_monologue_history = []
         self.experience_pool = []
+        self.assign_roles()
 
     def assign_roles(self):
         for i in range(self.num_players):
@@ -41,23 +41,34 @@ class AvalonGame:
 
     def nominate_team(self, leader, team_size):
         team = leader.nominate_team(team_size)
-        self.history.append(f"<b>Leader {leader.player_id} nominates team: {team}</b> - Reason: {leader.generate_response('Explain why you chose this team.')}")
+        proposal_explanation = leader.explain_proposal(team)
+        detailed_explanation = leader.generate_response('Explain why you chose this team.')
+        self.history.append(f"<b>Leader {leader.player_id} nominates team: {team}</b> - {proposal_explanation} - Reason: {detailed_explanation}")
         for player in self.players:
             player.remember(f"Leader {leader.player_id} nominates team: {team}")
         return team
 
-    def debate(self, leader):
+    def debate(self, leader, proposed_team):
         self.debate_history.append(f"<b>Debate for round {self.current_quest}:</b>")
-        debate_order = [(leader.player_id + i - 1) % self.num_players + 1 for i in range(self.num_players)]
-        for player_id in debate_order:
-            player = self.players[player_id - 1]
-            statement = player.debate()
-            self.debate_history.append(f"Player {player.player_id}: {statement}")
-            for other_player in self.players:
-                other_player.remember(f"Player {player.player_id}: {statement}")
+        self.debate_history.append(f"Player {leader.player_id}: I propose the team: {', '.join(['Player ' + str(player) for player in proposed_team])}.")
+        leader_statement = leader.debate(proposed_team)
+        self.debate_history.append(f"Player {leader.player_id} (Leader): {leader_statement}")
+        debate_feedback = [leader_statement]
+        for other_player in self.players:
+            if other_player.player_id != leader.player_id:
+                statement = other_player.debate(proposed_team)
+                self.debate_history.append(f"Player {other_player.player_id}: {statement}")
+                debate_feedback.append(statement)
+                for player in self.players:
+                    player.remember(f"Player {other_player.player_id}: {statement}")
+        final_team = leader.finalize_team(proposed_team, debate_feedback)
+        self.history.append(f"<b>Leader {leader.player_id} finalizes the team: {final_team}</b>")
+        for player in self.players:
+            player.remember(f"Leader {leader.player_id} finalizes the team: {final_team}")
+        return final_team
 
-    def vote_for_team(self, team):
-        votes = {player.player_id: player.vote_for_team(team) for player in self.players}
+    def vote_for_team(self, leader, team):
+        votes = {player.player_id: player.vote_for_team(team) if player.player_id != leader.player_id else 'Approve' for player in self.players}
         self.history.append(f"Team {team} voting results: {votes}")
         for player in self.players:
             player.remember(f"Team {team} voting results: {votes}")
@@ -100,16 +111,16 @@ class AvalonGame:
 
         self.history.append("")
         leader = self.players[(self.current_quest - 1) % self.num_players]
-        self.debate(leader)
         team_size = 2 if self.current_quest in [1, 2] else 3
-        team = self.nominate_team(leader, team_size)
-        self.vote_inner_monologue(team)
-        votes = self.vote_for_team(team)
+        initial_team = self.nominate_team(leader, team_size)
+        final_team = self.debate(leader, initial_team)
+        self.vote_inner_monologue(final_team)
+        votes = self.vote_for_team(leader, final_team)
         if list(votes.values()).count('Approve') > self.num_players / 2:
-            quest_result = self.execute_quest(team)
+            quest_result = self.execute_quest(final_team)
             self.quest_results.append(quest_result)
         else:
-            self.history.append(f"Team {team} was not approved.")
+            self.history.append(f"Team {final_team} was not approved.")
         self.current_quest += 1
 
         for player in self.players:

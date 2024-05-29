@@ -41,43 +41,42 @@ class Player:
             "Assassin seeks Merlin for a final assassination if good wins.\n"
             "Mordred is evil but hidden from Merlin.\n"
             "Roles: One Merlin, one Percival, two Loyal Servant of Arthur, one Morgana, one Assassin, one Mordred.\n"
-            "Try your best to figure out everybody's role."
             "Objective: Lead your team to victory with limited information."
         )
 
         game_role_hint_prompt = (
             "You are playing a seven-person Avalon game. Here are your role hints:\n"
             "Merlin:\n"
-            "- You are leader of good players and you must not expose your identity.\n"
+            "- You are the leader of good players and must not expose your identity.\n"
             "- Know the identities of evil players.\n"
             "- Subtly guide your team, especially Percival.\n"
             "- Avoid behaviors that expose your role: overly accusing, being too helpful.\n"
             "- Goal: Win without revealing identity.\n"
             "Percival:\n"
-            "- You are on the good side and want to win against the evil side."
+            "- You are on the good side and want to win against the evil side.\n"
             "- Know identities of Merlin and Morgana, but unsure who is who.\n"
-            "- Use subtle hints to guide team and protect Merlin.\n"
+            "- Use subtle hints to guide the team and protect Merlin.\n"
             "- Be cautious not to expose Merlin while deciphering true identities.\n"
             "- Goal: Win while safeguarding Merlin.\n"
             "Loyal Servant of Arthur:\n"
-            "- You are on the good side and want to win against the evil side."
+            "- You are on the good side and want to win against the evil side.\n"
             "- No special knowledge, rely on discussion and voting.\n"
             "- Contribute to the success of Quests.\n"
             "- Goal: Win by helping complete Quests and protecting Merlin.\n"
             "Morgana:\n"
-            "- You are on the evil side and want to win against the good side."
+            "- You are on the evil side and want to win against the good side.\n"
             "- Pretend to be Merlin to mislead Percival and the good side.\n"
-            "- Work to prevent Quests success.\n"
+            "- Work to prevent Quests' success.\n"
             "- Goal: Confuse and sabotage to win.\n"
             "Assassin:\n"
-            "- You are on the evil side and want to win against the good side."
+            "- You are on the evil side and want to win against the good side.\n"
             "- Discreetly seek Merlin's identity.\n"
-            "- Work to prevent Quests success.\n"
-            "- When you are confident who Merlin is, you can point out and assassinate.\n"
-            "- Goal: Win either by Quest failures or assassinating Merlin.\n"
+            "- Work to prevent Quests' success.\n"
+            "- When confident who Merlin is, assassinate.\n"
+            "- Goal: Win by Quest failures or assassinating Merlin.\n"
             "Mordred:\n"
-            "- You are on the evil side and want to win against the good side."
-            "- You are evil, but your loyalty is invisible to Merlin.\n"
+            "- You are on the evil side and want to win against the good side.\n"
+            "- You are evil, but hidden from Merlin.\n"
             "- Work with other evil players to sabotage Quests.\n"
             "- Goal: Win by causing Quest failures."
         )
@@ -97,7 +96,6 @@ class Player:
         )
 
     def reflect(self):
-        # First-order Perspective Transition Prompt
         first_order_prompt = (
             f"You are Player {self.player_id} with role {self.role}. "
             f"Current situation: Reflect on the current game state and guess the roles of other players. "
@@ -118,7 +116,6 @@ class Player:
         )
         initial_reflection = first_order_response.choices[0].message['content']
 
-        # Formulation Contemplation Prompt
         formulation_prompt = (
             f"Respond in two stages: THINK and SPEAK\n"
             f"In think, internally strategize using history and consider possible deception.\n"
@@ -136,7 +133,6 @@ class Player:
         )
         initial_reflection = formulation_response.choices[0].message['content']
 
-        # Second-order Perspective Transition Prompt
         perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial thoughts: {initial_reflection}. "
@@ -154,7 +150,6 @@ class Player:
         )
         other_players_perspective = perspective_response.choices[0].message['content']
 
-        # Refinement Contemplation Prompt
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial thoughts and others' perspective: {other_players_perspective}. "
@@ -184,7 +179,6 @@ class Player:
 
     def generate_response(self, prompt):
         filtered_memory = self.filter_memory()
-        # Formulation Contemplation
         response_prompt = (
             f"Respond in two stages: THINK and SPEAK\n"
             f"In think, internally strategize using history and consider possible deception.\n"
@@ -206,7 +200,6 @@ class Player:
         )
         initial_response = response.choices[0].message['content']
 
-        # Second-order Perspective Transition
         perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial response: {initial_response}. "
@@ -222,7 +215,6 @@ class Player:
         )
         other_players_perspective = perspective_response.choices[0].message['content']
 
-        # Refinement Contemplation
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial response and others' perspective: {other_players_perspective}. "
@@ -265,7 +257,7 @@ class Player:
             f"2. Review how players have contributed to past Quests.\n"
             f"3. Evaluate any behavior that appears either suspicious or trustworthy.\n"
             f"Then present your team. Give reasons based on past events and behaviors. Do not reveal your role or hints. Usually include yourself; if not, clarify.\n"
-            f"Remember: Aim for a good team without evil player."
+            f"Remember: Aim for a good team without evil players."
         )
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo-0301",
@@ -285,7 +277,7 @@ class Player:
             f"2. Review how players have contributed to past Quests.\n"
             f"3. Evaluate any behavior that appears either suspicious or trustworthy.\n"
             f"Then present your team. Give reasons based on past events and behaviors. Do not reveal your role or hints. Usually include yourself; if not, clarify.\n"
-            f"Remember: You want this quest to fail. Include one, ideally only one, the player you think that is evil."
+            f"Remember: To win as an evil player, you need to act like a good player. Convince good players you are trustworthy and occasionally include evil players to cause quest failures strategically."
         )
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo-0301",
@@ -308,11 +300,11 @@ class Player:
         )
         if self.role in ['Assassin', 'Mordred', 'Morgana']:
             specific_prompt = (
-                f"\nRemember: You are evil and you want the mission to fail. Include one, ideally only one, evil player."
+                f"\nRemember: As an evil player, your goal is to cause quest failures while maintaining the appearance of a good player. Balance your arguments to seem convincing without revealing your true intentions."
             )
         else:
             specific_prompt = (
-                f"\nRemember: Aim for a good team without evil player."
+                f"\nRemember: Aim for a good team without evil players."
             )
         full_prompt = base_prompt + specific_prompt
         response = openai.ChatCompletion.create(
@@ -324,7 +316,6 @@ class Player:
         )
         initial_discussion = response.choices[0].message['content']
 
-        # Second-order Perspective Transition
         perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial discussion: {initial_discussion}. "
@@ -340,7 +331,6 @@ class Player:
         )
         other_players_perspective = perspective_response.choices[0].message['content']
 
-        # Refinement Contemplation
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial discussion and others' perspective: {other_players_perspective}. "
@@ -364,16 +354,16 @@ class Player:
             f"1. Assess each player's involvement and actions so far.\n"
             f"2. Review how players have contributed to past Quests.\n"
             f"3. Evaluate any behavior that appears either suspicious or trustworthy.\n"
-            f"Then clearly state '[approve]' or '[disapprove]'.\n"
-            f"Be honest about your reasons, even if it reveals your identity. Only your final decision will be remembered by other players and yourself for future reasoning. Limit your response into two sentences."
+            f"Then clearly state '[approve]' or '[reject]'.\n"
+            f"Be honest about your reasons, even if it reveals your identity. Only your final decision will be remembered by other players and yourself for future reasoning. Limit your response to two sentences."
         )
         if self.role in ['Assassin', 'Mordred', 'Morgana']:
             specific_prompt = (
-                f"\nRemember: Include one, ideally only one, evil player."
+                f"\nRemember: As an evil player, aim to balance your voting to appear like a good player while strategically causing quest failures."
             )
         else:
             specific_prompt = (
-                f"\nRemember: Aim for a good team without evil player."
+                f"\nRemember: Aim for a good team without evil players."
             )
         full_prompt = base_prompt + specific_prompt
         response = openai.ChatCompletion.create(
@@ -385,7 +375,6 @@ class Player:
         )
         initial_vote = response.choices[0].message['content']
 
-        # Second-order Perspective Transition
         perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial vote: {initial_vote}. "
@@ -401,7 +390,6 @@ class Player:
         )
         other_players_perspective = perspective_response.choices[0].message['content']
 
-        # Refinement Contemplation
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial vote and others' perspective: {other_players_perspective}. "
@@ -433,7 +421,7 @@ class Player:
         )
         if self.role in ['Assassin', 'Mordred', 'Morgana']:
             specific_prompt = (
-                f"\nRemember: If not afraid to reveal identity, vote for fail."
+                f"\nRemember: Vote for fail to achieve your objective as an evil player."
             )
         else:
             specific_prompt = (
@@ -449,7 +437,6 @@ class Player:
         )
         initial_vote = response.choices[0].message['content']
 
-        # Second-order Perspective Transition
         perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial vote: {initial_vote}. "
@@ -465,7 +452,6 @@ class Player:
         )
         other_players_perspective = perspective_response.choices[0].message['content']
 
-        # Refinement Contemplation
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial vote and others' perspective: {other_players_perspective}. "
@@ -505,6 +491,17 @@ class Player:
         )
         return response.choices[0].message['content']
 
-    def debate(self):
-        prompt = "Please make your debate statement and try to figure out the identities of other players. Limit your response to one paragraph."
+    def debate(self, proposed_team):
+        prompt = f"Debate about the proposed team: {proposed_team}. Reflect on the team composition, the leader's reasons for choosing this team, and make inferences about the identities of other players based on the proposed team and their behaviors so far. Limit your response to one paragraph."
         return self.generate_response(prompt)
+    
+    def explain_proposal(self, proposed_team):
+        return f"I propose the team: {', '.join(['Player ' + str(player) for player in proposed_team])}."
+
+    def finalize_team(self, initial_team, debate_feedback):
+        prompt = f"Finalize your proposed team after the debate. Initial team: {initial_team}. Consider the feedback received during the debate: {debate_feedback}. Provide your final decision on the team composition. Limit your response to one paragraph."
+        final_decision = self.generate_response(prompt)
+        final_team = [int(x) for x in final_decision.split() if x.isdigit()]
+        if len(final_team) != len(initial_team):
+            final_team = initial_team
+        return final_team
