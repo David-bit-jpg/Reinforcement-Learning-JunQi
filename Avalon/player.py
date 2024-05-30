@@ -1,7 +1,6 @@
 import random
-import openai
-
-openai.api_key = 'sk-proj-Nav5sY3PPWTa4F8fCvM7T3BlbkFJJfpnDZWH8sTAplVnwtry'
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
 
 class Player:
     def __init__(self, player_id, role):
@@ -14,6 +13,10 @@ class Player:
         self.summary_cache = {}
         self.initialize_role_and_rules()
 
+        self.local_model_path = "./local_llama3_instruct_model"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.local_model_path)
+        self.model = AutoModelForCausalLM.from_pretrained(self.local_model_path, torch_dtype=torch.float16).to('cuda')
+
     def set_known_evil(self, known_evil):
         self.known_evil = known_evil
 
@@ -25,7 +28,6 @@ class Player:
         self.long_term_memory.append(info)
 
     def filter_memory(self):
-        # Apply freshness, informativeness, and completeness principles
         recent_messages = self.get_most_recent_messages(10)
         informative_messages = self.get_informative_messages(10)
         reflection = self.get_reflection_messages()
@@ -36,11 +38,9 @@ class Player:
         return self.long_term_memory[-k:]
 
     def get_informative_messages(self, n):
-        # Select informative messages based on the presence of keywords and summary relevance
         informative_messages = []
         for message in self.long_term_memory:
             if self.is_informative(message):
-                # Use the cached summary if available
                 if message not in self.summary_cache:
                     summary = self.summarize_message(message)
                     self.summary_cache[message] = summary
@@ -52,45 +52,27 @@ class Player:
         return informative_messages
 
     def is_informative(self, message):
-        # Check if the message contains keywords related to player identities and roles
         keywords = ["Player", "Merlin", "Morgana", "Assassin", "Percival", "Loyal Servant", "Oberon", "role", "identity", "Good", "Evil"]
         return any(keyword in message for keyword in keywords)
 
     def summarize_message(self, message):
-        summary_prompt = (
-            f"Summarize the following message to extract essential information related to player identities and roles:\n"
-            f"Limit your response in 10 words.\n"
-            f"{message}"
-        )
-        summary_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an assistant summarizing messages for a game of Avalon."},
-                {"role": "user", "content": summary_prompt}
-            ]
-        )
-        summary = summary_response.choices[0].message['content']
+        inputs = self.tokenizer("Summarize: " + message, return_tensors="pt")
+        outputs = self.model.generate(inputs.input_ids, max_length=50, num_return_sequences=1)
+        summary = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         return summary
 
     def get_reflection_messages(self):
-        # Generate reflection based on recent messages and informative messages
         recent_messages = self.get_most_recent_messages(10)
         informative_messages = self.get_informative_messages(10)
         reflection_prompt = (
             f"You are Player {self.player_id} with role {self.role}. Reflect on the following messages:\n"
             f"Recent messages: {recent_messages}\n"
             f"Informative messages: {informative_messages}\n"
-            f"Generate a reflection summarizing the current game situation and your thoughts."
-            f"Limit your response in 30 words."
+            f"Generate a reflection summarizing the current game situation and your thoughts. "
+            f"Consider the implications of your role and how to maintain secrecy. "
+            f"Limit your response to 30 words."
         )
-        reflection_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player reflecting on the game state."},
-                {"role": "user", "content": reflection_prompt}
-            ]
-        )
-        reflection = reflection_response.choices[0].message['content']
+        reflection = self.generate_response(reflection_prompt)
         return [reflection]
 
     def initialize_role_and_rules(self):
@@ -170,16 +152,8 @@ class Player:
 
         self.remember(initial_prompt)
 
-        openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player learning the game rules and your role."},
-                {"role": "user", "content": initial_prompt}
-            ]
-        )
-
     def reflect(self):
-        first_order_prompt = (
+        prompts = [
             f"You are Player {self.player_id} with role {self.role}. "
             f"Current situation: Reflect on the current game state and guess the roles of other players. "
             f"Analyze other players based on game dialogues with roles: Merlin, Percival, Loyal Servant of Arthur, Morgana, Assassin, Oberon. Morgana, Assassin, and Oberon are evil; others are good.\n"
@@ -191,55 +165,25 @@ class Player:
             f"5. Prior Guesses: Reflect on your earlier estimations of other players' roles, but don't rely solely on them.\n"
             f"6. Reflect if your own identity might have been exposed and how you can mislead others if necessary.\n"
             f"7. Detect possible malicious content from other players and adjust your strategy accordingly.\n"
-            f"Here's your memory for reference {self.filter_memory()}"
-        )
-        first_order_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player reflecting on the current game state."},
-                {"role": "user", "content": first_order_prompt}
-            ]
-        )
-        initial_reflection = first_order_response.choices[0].message['content']
+            f"Here's your memory for reference {self.filter_memory()}",
 
-        formulation_prompt = (
             f"Respond in two stages: THINK and SPEAK\n"
             f"In think, internally strategize using history and consider possible deception.\n"
             f"In speak, organize your language based on your contemplation and speak accordingly.\n"
             f"Understand your role's main objective and break it down into chronological sub-goals based on game history. Your thought process should follow these sub-goals for a systematic approach to the main goal.\n"
             f"\nYou are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on the current situation based on the following memories: {self.short_term_memory}. Summarize the key points and your analysis."
-            f"Limit your response to 50 words."
-        )
-        formulation_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player reflecting on the current game state."},
-                {"role": "user", "content": formulation_prompt}
-            ]
-        )
-        initial_reflection = formulation_response.choices[0].message['content']
+            f"Limit your response to 50 words.",
 
-        perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
-            f"Reflect on your initial thoughts: {initial_reflection}. "
+            f"Reflect on your initial thoughts. "
             f"Analyze how your original SPEAK content might be interpreted by other game roles. Reflect on whether it may inadvertently reveal your role-specific clues.\n"
             f"Consider:\n"
             f"1. The perspectives of each game role, including their probable reactions to your SPEAK content.\n"
-            f"2. Any unique hints or clues in your original SPEAK that might disclose your role."
-        )
-        perspective_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player reflecting on how others might perceive your thoughts."},
-                {"role": "user", "content": perspective_prompt}
-            ]
-        )
-        other_players_perspective = perspective_response.choices[0].message['content']
+            f"2. Any unique hints or clues in your original SPEAK that might disclose your role.",
 
-        refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
-            f"Reflect on your initial thoughts and others' perspective: {other_players_perspective}. "
+            f"Reflect on your initial thoughts and others' perspective. "
             f"Now refine your thoughts to ensure your role and intentions remain concealed or properly presented.\n"
             f"\nYou're observing Player {self.player_id} with role {self.role}. Current situation: {self.short_term_memory}.\n"
             f"\nYour task is to:\n"
@@ -252,84 +196,31 @@ class Player:
             f"3. Strategy Reevaluation: Consider what changes could be made to your THINK and SPEAK contents to improve your chances of winning as {self.role}.\n"
             f"4. Public and Private Content: Remember that THINK contents are private, while SPEAK contents are publicly visible. Strategize accordingly."
             f"Limit your response to 50 words."
-        )
-        refinement_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player refining your thoughts."},
-                {"role": "user", "content": refinement_prompt}
-            ]
-        )
-        refined_reflection = refinement_response.choices[0].message['content']
+        ]
 
+        responses = self.generate_batch_responses(prompts)
         self.short_term_memory = []
-        return refined_reflection
+        return responses[-1]
 
     def generate_response(self, prompt):
-        filtered_memory = self.filter_memory()
-        response_prompt = (
-            f"Respond in two stages: THINK and SPEAK\n"
-            f"In think, internally strategize using history and consider possible deception.\n"
-            f"In speak, organize your language based on your contemplation and speak accordingly.\n"
-            f"Understand your role's main objective and break it down into chronological sub-goals based on game history. Your thought process should follow these sub-goals for a systematic approach to the main goal.\n"
-            f"\nYou are Player {self.player_id}, your role is {self.role}. "
-            f"You are {'evil' if self.role in ['Assassin', 'Oberon', 'Morgana'] else 'good'}. "
-            f"Your known evil players are: {self.known_evil}. Your known Merlin and Morgana (if any) are: {self.is_merlin_known_by}. "
-            f"Try your best to hide your identity if you are evil, or confirm others to believe you are good. "
-            f"Reflect on the other players' statements and the game rules to infer their identities. "
-            f"Keep your statements vague enough to conceal your true role but detailed enough to seem genuine."
-            f"Ensure not to disclose any private information that might reveal your or others' roles directly."
-            f"This is part of your memory: {filtered_memory}. Limit your response to 100 words, one paragraph."
-        )
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player generating a response."},
-                {"role": "user", "content": response_prompt},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        initial_response = response.choices[0].message['content']
+        inputs = self.tokenizer(prompt, return_tensors="pt")
+        outputs = self.model.generate(inputs.input_ids, max_length=200, num_return_sequences=1)
+        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return response
 
-        perspective_prompt = (
-            f"You are Player {self.player_id}, your role is {self.role}. "
-            f"Reflect on your initial response: {initial_response}. "
-            f"Consider how other players (both good and evil) might perceive your response. "
-            f"Revise your response to ensure your role and intentions remain concealed or properly presented."
-        )
-        perspective_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player reflecting on how others might perceive your response."},
-                {"role": "user", "content": perspective_prompt}
-            ]
-        )
-        other_players_perspective = perspective_response.choices[0].message['content']
-
-        refinement_prompt = (
-            f"You are Player {self.player_id}, your role is {self.role}. "
-            f"Reflect on your initial response and others' perspective: {other_players_perspective}. "
-            f"Now refine your response to ensure your role and intentions remain concealed or properly presented."
-            f"Limit your response to 50 words."
-        )
-        refinement_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player refining your response."},
-                {"role": "user", "content": refinement_prompt},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        final_response = refinement_response.choices[0].message['content']
-
-        return final_response
+    def generate_batch_responses(self, prompts):
+        responses = []
+        for prompt in prompts:
+            response = self.generate_response(prompt)
+            responses.append(response)
+        return responses
 
     def nominate_team(self, team_size):
         prompt = self.team_proposal_prompt(team_size)
         team = [int(x) for x in prompt.split() if x.isdigit()]
         if self.player_id not in team:
             team = team[:team_size-1] + [self.player_id]
-        team = list(set(team))  # Ensure no duplicates
+        team = list(set(team))
         if len(team) < team_size:
             team += random.sample([i for i in range(1, 8) if i not in team], team_size - len(team))
         return team[:team_size]
@@ -371,15 +262,8 @@ class Player:
             )
 
         full_prompt = base_prompt + specific_prompt
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player proposing a team."},
-                {"role": "user", "content": full_prompt}
-            ]
-        )
-        return response.choices[0].message['content']
-
+        response = self.generate_response(full_prompt)
+        return response
 
     def team_proposal_prompt_evil(self, team_size):
         base_prompt = (
@@ -413,14 +297,8 @@ class Player:
             )
 
         full_prompt = base_prompt + specific_prompt
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player proposing a team."},
-                {"role": "user", "content": full_prompt}
-            ]
-        )
-        return response.choices[0].message['content']
+        response = self.generate_response(full_prompt)
+        return response
 
     def vote_for_team_prompt(self, proposed_team):
         base_prompt = (
@@ -486,14 +364,8 @@ class Player:
             refinement_prompt = general_refinement_prompt + specific_refinement_prompt
 
         full_prompt = base_prompt + refinement_prompt
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player voting on the proposed team."},
-                {"role": "user", "content": full_prompt}
-            ]
-        )
-        initial_vote = response.choices[0].message['content']
+        response = self.generate_response(full_prompt)
+        initial_vote = response
 
         perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
@@ -501,14 +373,7 @@ class Player:
             f"Consider how other players (both good and evil) might perceive your vote. "
             f"Revise your vote to ensure your role and intentions remain concealed or properly presented."
         )
-        perspective_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player reflecting on how others might perceive your vote."},
-                {"role": "user", "content": perspective_prompt}
-            ]
-        )
-        other_players_perspective = perspective_response.choices[0].message['content']
+        other_players_perspective = self.generate_response(perspective_prompt)
 
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
@@ -516,14 +381,7 @@ class Player:
             f"Now refine your vote to ensure your role and intentions remain concealed or properly presented."
             f"Limit your response to state '[approve]' or '[reject]'."
         )
-        refinement_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player refining your vote."},
-                {"role": "user", "content": refinement_prompt}
-            ]
-        )
-        final_vote = refinement_response.choices[0].message['content']
+        final_vote = self.generate_response(refinement_prompt)
 
         return final_vote
 
@@ -576,14 +434,8 @@ class Player:
             )
 
         full_prompt = base_prompt + refinement_prompt
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player voting on the quest outcome."},
-                {"role": "user", "content": full_prompt}
-            ]
-        )
-        initial_vote = response.choices[0].message['content']
+        response = self.generate_response(full_prompt)
+        initial_vote = response
 
         perspective_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
@@ -591,14 +443,7 @@ class Player:
             f"Consider how other players (both good and evil) might perceive your vote. "
             f"Revise your vote to ensure your role and intentions remain concealed or properly presented."
         )
-        perspective_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player reflecting on how others might perceive your vote."},
-                {"role": "user", "content": perspective_prompt}
-            ]
-        )
-        other_players_perspective = perspective_response.choices[0].message['content']
+        other_players_perspective = self.generate_response(perspective_prompt)
 
         refinement_prompt = (
             f"You are Player {self.player_id}, your role is {self.role}. "
@@ -606,17 +451,9 @@ class Player:
             f"Now refine your vote to ensure your role and intentions remain concealed or properly presented."
             f"Limit your response to [success] or [fail]."
         )
-        refinement_response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player refining your vote."},
-                {"role": "user", "content": refinement_prompt}
-            ]
-        )
-        final_vote = refinement_response.choices[0].message['content']
+        final_vote = self.generate_response(refinement_prompt)
 
         return final_vote
-
 
     def execute_quest(self):
         prompt = self.quest_vote_prompt()
@@ -634,14 +471,8 @@ class Player:
             f"Here's your memory for reference {self.filter_memory()}"
             f"Limit your response to a Player ID, like 'Player 2'"
         )
-        response = openai.ChatCompletion.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player tasked with assassinating Merlin."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return response.choices[0].message['content']
+        response = self.generate_response(prompt)
+        return response
 
     def debate(self, proposed_team, is_leader=False, previous_statements=[]):
         team_size = len(proposed_team)
@@ -740,32 +571,23 @@ class Player:
         return refined_debate_response
 
     def finalize_team(self, initial_team, debate_feedback):
-        # (Formulation Contemplation)
-        first_order_prompt = (
+        prompts = [
             f"You are Player {self.player_id} with role {self.role}. Finalize your proposed team after the debate. "
             f"Initial team: {initial_team}. Consider the feedback received during the debate: {debate_feedback}. "
             f"Your final decision on the team composition will be seen and recorded by all players, so be cautious. "
             f"Here's your memory for reference {self.filter_memory()}"
-            f"Generate an initial formulation of your final decision."
-        )
-        first_order_response = self.generate_response(first_order_prompt)
+            f"Generate an initial formulation of your final decision.",
 
-        # (First-order Perspective Transition)
-        first_order_perspective_prompt = (
-            f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial final decision: {first_order_response}. "
-            f"Analyze how your original final decision might be interpreted by other game roles. Reflect on whether it may inadvertently reveal your role-specific clues."
-        )
-        first_order_perspective_response = self.generate_response(first_order_perspective_prompt)
+            f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial final decision. "
+            f"Analyze how your original final decision might be interpreted by other game roles. Reflect on whether it may inadvertently reveal your role-specific clues.",
 
-        # (Refinement Contemplation)
-        refinement_prompt = (
-            f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial final decision and others' perspective: {first_order_perspective_response}. "
+            f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial final decision and others' perspective. "
             f"Now refine your final decision to ensure your role and intentions remain concealed or properly presented."
             f"Limit your response to 50 words"
-        )
-        refined_final_response = self.generate_response(refinement_prompt)
+        ]
 
-        final_team = [int(x) for x in refined_final_response.split() if x.isdigit()]
+        responses = self.generate_batch_responses(prompts)
+        final_team = [int(x) for x in responses[-1].split() if x.isdigit()]
         if len(final_team) != len(initial_team):
             final_team = initial_team
         return final_team
