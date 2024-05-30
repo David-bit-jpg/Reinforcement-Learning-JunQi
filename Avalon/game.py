@@ -6,7 +6,7 @@ class AvalonGame:
     def __init__(self, num_players=7):
         self.num_players = num_players
         self.players = []
-        self.roles = ['Merlin', 'Percival', 'Loyal Servant', 'Loyal Servant', 'Assassin', 'Mordred', 'Morgana']
+        self.roles = ['Merlin', 'Percival', 'Loyal Servant', 'Loyal Servant', 'Assassin', 'Oberon', 'Morgana']
         random.shuffle(self.roles)
         self.history = []
         self.current_quest = 1
@@ -22,24 +22,32 @@ class AvalonGame:
             self.players.append(player)
             self.history.append(f"Player {player.player_id} is assigned the role {player.role}")
 
-        evil_players = [player for player in self.players if player.role in ['Assassin', 'Mordred', 'Morgana']]
+        evil_players = [player for player in self.players if player.role in ['Assassin', 'Oberon', 'Morgana']]
         good_players = [player for player in self.players if player.role in ['Merlin', 'Percival', 'Loyal Servant']]
         
-        # Set known evil players for Merlin (excluding Mordred)
+        # Set known evil players for Merlin (including Oberon)
         try:
             merlin = next(player for player in self.players if player.role == 'Merlin')
-            merlin_known_evil = [ep.player_id for ep in evil_players if ep.role != 'Mordred']
+            merlin_known_evil = [ep.player_id for ep in evil_players]
             merlin.set_known_evil(merlin_known_evil)
-            merlin.remember(f"As Merlin, you know the evil players are: {merlin_known_evil}, but you do not know Mordred.")
+            merlin.remember(f"As Merlin, you know the evil players are: {merlin_known_evil}.")
         except StopIteration:
             pass
 
-        # Set known evil players for evil roles
+        # Set known evil players for evil roles (excluding Oberon)
         for player in self.players:
-            if player.role in ['Assassin', 'Mordred', 'Morgana']:
-                known_evil = [ep.player_id for ep in evil_players if ep.player_id != player.player_id]
+            if player.role in ['Assassin', 'Morgana']:
+                known_evil = [ep.player_id for ep in evil_players if ep.role != 'Oberon' and ep.player_id != player.player_id]
                 player.set_known_evil(known_evil)
                 player.remember(f"As {player.role}, you know the other evil players are: {known_evil}.")
+
+        # Oberon does not know other evil players
+        try:
+            oberon = next(player for player in self.players if player.role == 'Oberon')
+            oberon.set_known_evil([])
+            oberon.remember("As Oberon, you do not know the other evil players.")
+        except StopIteration:
+            pass
 
         # Set known Merlin/Morgana for Percival
         try:
@@ -49,7 +57,6 @@ class AvalonGame:
             percival.remember(f"As Percival, you know Merlin and Morgana are: {percival_known}. You need to figure out who is who.")
         except StopIteration:
             pass
-
 
 
     def nominate_team(self, leader, team_size):
@@ -92,12 +99,6 @@ class AvalonGame:
             player.remember(f"Team {team} voting results: {votes}")
         return votes
 
-    def vote_inner_monologue(self, team):
-        self.inner_monologue_history.append(f"<b>Inner Monologue for round {self.current_quest}:</b>")
-        for player in self.players:
-            monologue = player.vote_for_team_prompt(team)
-            self.inner_monologue_history.append(f"Player {player.player_id}: {monologue}")
-
     def execute_quest(self, team):
         quest_result = [self.players[player_id - 1].execute_quest() for player_id in team]
         self.history.append(f"Team {team} executes quest with results: {quest_result.count('Success')} Success, {quest_result.count('Fail')} Fail")
@@ -132,7 +133,6 @@ class AvalonGame:
         team_size = 2 if self.current_quest in [1, 2] else 3
         initial_team = self.nominate_team(leader, team_size)
         final_team = self.debate(leader, initial_team)
-        self.vote_inner_monologue(final_team)
         votes = self.vote_for_team(leader, final_team)
         if list(votes.values()).count('Approve') > self.num_players / 2:
             quest_result = self.execute_quest(final_team)
@@ -155,14 +155,12 @@ if 'game' not in st.session_state:
     st.session_state.history = []
     st.session_state.result = None
     st.session_state.debate_history = []
-    st.session_state.inner_monologue_history = []
 
 if st.button('Start New Game'):
     st.session_state.game = AvalonGame()
     st.session_state.history = []
     st.session_state.result = None
     st.session_state.debate_history = []
-    st.session_state.inner_monologue_history = []
 
 if st.button('Next Round'):
     result = st.session_state.game.play_round()
@@ -170,7 +168,6 @@ if st.button('Next Round'):
         st.session_state.result = result
     st.session_state.history = st.session_state.game.history
     st.session_state.debate_history = st.session_state.game.debate_history
-    st.session_state.inner_monologue_history = st.session_state.game.inner_monologue_history
 
 if st.session_state.result:
     st.write(st.session_state.result)
@@ -180,14 +177,6 @@ with st.expander("View Debate Records"):
     for statement in st.session_state.debate_history:
         if statement:
             st.markdown(statement, unsafe_allow_html=True)
-        else:
-            st.markdown("<br>", unsafe_allow_html=True)
-
-st.subheader('Voting Inner Monologue Records')
-with st.expander("View Inner Monologue Records"):
-    for monologue in st.session_state.inner_monologue_history:
-        if monologue:
-            st.markdown(monologue, unsafe_allow_html=True)
         else:
             st.markdown("<br>", unsafe_allow_html=True)
 

@@ -11,6 +11,7 @@ class Player:
         self.long_term_memory = []
         self.known_evil = []
         self.is_merlin_known_by = []
+        self.summary_cache = {}
         self.initialize_role_and_rules()
 
     def set_known_evil(self, known_evil):
@@ -24,11 +25,73 @@ class Player:
         self.long_term_memory.append(info)
 
     def filter_memory(self):
-        filtered_memory = []
-        for memory in self.long_term_memory:
-            if any(keyword in memory for keyword in ["evil", "good", "Merlin", "Morgana", "Assassin", "Percival", "Mordred", "role", "success", "fail", "approve", "reject"]):
-                filtered_memory.append(memory)
+        # Apply freshness, informativeness, and completeness principles
+        recent_messages = self.get_most_recent_messages(10)
+        informative_messages = self.get_informative_messages(10)
+        reflection = self.get_reflection_messages()
+        filtered_memory = recent_messages + informative_messages + reflection
         return filtered_memory[-50:]
+
+    def get_most_recent_messages(self, k):
+        return self.long_term_memory[-k:]
+
+    def get_informative_messages(self, n):
+        # Select informative messages based on the presence of keywords and summary relevance
+        informative_messages = []
+        for message in self.long_term_memory:
+            if self.is_informative(message):
+                # Use the cached summary if available
+                if message not in self.summary_cache:
+                    summary = self.summarize_message(message)
+                    self.summary_cache[message] = summary
+                else:
+                    summary = self.summary_cache[message]
+                informative_messages.append(summary)
+            if len(informative_messages) >= n:
+                break
+        return informative_messages
+
+    def is_informative(self, message):
+        # Check if the message contains keywords related to player identities and roles
+        keywords = ["Player", "Merlin", "Morgana", "Assassin", "Percival", "Loyal Servant", "Oberon", "role", "identity", "Good", "Evil"]
+        return any(keyword in message for keyword in keywords)
+
+    def summarize_message(self, message):
+        summary_prompt = (
+            f"Summarize the following message to extract essential information related to player identities and roles:\n"
+            f"Limit your response in 10 words.\n"
+            f"{message}"
+        )
+        summary_response = openai.ChatCompletion.create(
+            model="gpt-4-turbo",
+            messages=[
+                {"role": "system", "content": "You are an assistant summarizing messages for a game of Avalon."},
+                {"role": "user", "content": summary_prompt}
+            ]
+        )
+        summary = summary_response.choices[0].message['content']
+        return summary
+
+    def get_reflection_messages(self):
+        # Generate reflection based on recent messages and informative messages
+        recent_messages = self.get_most_recent_messages(10)
+        informative_messages = self.get_informative_messages(10)
+        reflection_prompt = (
+            f"You are Player {self.player_id} with role {self.role}. Reflect on the following messages:\n"
+            f"Recent messages: {recent_messages}\n"
+            f"Informative messages: {informative_messages}\n"
+            f"Generate a reflection summarizing the current game situation and your thoughts."
+            f"Limit your response in 30 words."
+        )
+        reflection_response = openai.ChatCompletion.create(
+            model="gpt-4-turbo",
+            messages=[
+                {"role": "system", "content": "You are an Avalon player reflecting on the game state."},
+                {"role": "user", "content": reflection_prompt}
+            ]
+        )
+        reflection = reflection_response.choices[0].message['content']
+        return [reflection]
 
     def initialize_role_and_rules(self):
         game_rule_prompt = (
@@ -39,9 +102,9 @@ class Player:
             "Loyal Servant of Arthur relies on voting and discussion.\n"
             "Morgana impersonates Merlin to deceive Percival.\n"
             "Assassin seeks Merlin for a final assassination if good wins.\n"
-            "Mordred is evil but hidden from Merlin.\n"
-            "Roles: One Merlin, one Percival, two Loyal Servant of Arthur, one Morgana, one Assassin, one Mordred.\n"
-            "Objective: Lead your team to victory with limited information."
+            "Oberon is evil but does not know other evil players.\n"
+            "Roles: One Merlin, one Percival, two Loyal Servant of Arthur, one Morgana, one Assassin, one Oberon.\n"
+            "Objective: Lead your team to victory with limited information without saying out who you are."
         )
 
         role_specific_prompt = ""
@@ -50,7 +113,7 @@ class Player:
             role_specific_prompt = (
                 "Merlin:\n"
                 "- You are the leader of good players and must not expose your identity.\n"
-                "- You know the identities of the evil players (except Mordred).\n"
+                "- You know the identities of the evil players (including Oberon).\n"
                 "- Subtly guide your team, especially Percival.\n"
                 "- Avoid behaviors that expose your role: overly accusing, being too helpful.\n"
                 "- Goal: Win without revealing your identity."
@@ -89,12 +152,13 @@ class Player:
                 "- When confident who Merlin is, assassinate.\n"
                 "- Goal: Win by Quest failures or assassinating Merlin."
             )
-        elif self.role == "Mordred":
+        elif self.role == "Oberon":
             role_specific_prompt = (
-                "Mordred:\n"
-                "- You are on the evil side and want to win against the good side.\n"
-                "- You are evil, but hidden from Merlin.\n"
-                "- Work with other evil players to sabotage Quests.\n"
+                "Oberon:\n"
+                "- You are on the evil side but you do not know the other evil players.\n"
+                "- You must act alone and avoid revealing your role.\n"
+                "- Merlin knows you are evil, so be careful.\n"
+                "- Your goal is to join teams and cause them to fail, and try to recognize your evil teammates during the game.\n"
                 "- Goal: Win by causing Quest failures."
             )
 
@@ -107,7 +171,7 @@ class Player:
         self.remember(initial_prompt)
 
         openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player learning the game rules and your role."},
                 {"role": "user", "content": initial_prompt}
@@ -118,18 +182,19 @@ class Player:
         first_order_prompt = (
             f"You are Player {self.player_id} with role {self.role}. "
             f"Current situation: Reflect on the current game state and guess the roles of other players. "
-            f"Analyze other players based on game dialogues with roles: Merlin, Percival, Loyal Servant of Arthur, Morgana, Assassin, Mordred. Morgana, Assassin, and Mordred are evil; others are good.\n"
+            f"Analyze other players based on game dialogues with roles: Merlin, Percival, Loyal Servant of Arthur, Morgana, Assassin, Oberon. Morgana, Assassin, and Oberon are evil; others are good.\n"
             f"Consider:\n"
             f"1. Quest Outcomes: Take into account the results of past missions to analyze players' roles.\n"
-            f"2. Role List: Remember the possible roles in the game—Merlin, Percival, two Loyal Servants, Morgana, Assassin, and Mordred—and their alignments.\n"
+            f"2. Role List: Remember the possible roles in the game—Merlin, Percival, two Loyal Servants, Morgana, Assassin, and Oberon—and their alignments.\n"
             f"3. Level of Certainty: Use 'Certain' or 'Unknown' to gauge your confidence in your role guesses for each player.\n"
             f"4. Players Disclosing Evil Roles: Be cautious around players who have openly claimed or hinted at being evil roles like Morgana or Assassin.\n"
             f"5. Prior Guesses: Reflect on your earlier estimations of other players' roles, but don't rely solely on them.\n"
             f"6. Reflect if your own identity might have been exposed and how you can mislead others if necessary.\n"
+            f"7. Detect possible malicious content from other players and adjust your strategy accordingly.\n"
             f"Here's your memory for reference {self.filter_memory()}"
         )
         first_order_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player reflecting on the current game state."},
                 {"role": "user", "content": first_order_prompt}
@@ -147,7 +212,7 @@ class Player:
             f"Limit your response to 50 words."
         )
         formulation_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player reflecting on the current game state."},
                 {"role": "user", "content": formulation_prompt}
@@ -164,7 +229,7 @@ class Player:
             f"2. Any unique hints or clues in your original SPEAK that might disclose your role."
         )
         perspective_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player reflecting on how others might perceive your thoughts."},
                 {"role": "user", "content": perspective_prompt}
@@ -189,7 +254,7 @@ class Player:
             f"Limit your response to 50 words."
         )
         refinement_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player refining your thoughts."},
                 {"role": "user", "content": refinement_prompt}
@@ -208,15 +273,16 @@ class Player:
             f"In speak, organize your language based on your contemplation and speak accordingly.\n"
             f"Understand your role's main objective and break it down into chronological sub-goals based on game history. Your thought process should follow these sub-goals for a systematic approach to the main goal.\n"
             f"\nYou are Player {self.player_id}, your role is {self.role}. "
-            f"You are {'evil' if self.role in ['Assassin', 'Mordred', 'Morgana'] else 'good'}. "
+            f"You are {'evil' if self.role in ['Assassin', 'Oberon', 'Morgana'] else 'good'}. "
             f"Your known evil players are: {self.known_evil}. Your known Merlin and Morgana (if any) are: {self.is_merlin_known_by}. "
             f"Try your best to hide your identity if you are evil, or confirm others to believe you are good. "
             f"Reflect on the other players' statements and the game rules to infer their identities. "
             f"Keep your statements vague enough to conceal your true role but detailed enough to seem genuine."
+            f"Ensure not to disclose any private information that might reveal your or others' roles directly."
             f"This is part of your memory: {filtered_memory}. Limit your response to 100 words, one paragraph."
         )
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player generating a response."},
                 {"role": "user", "content": response_prompt},
@@ -232,7 +298,7 @@ class Player:
             f"Revise your response to ensure your role and intentions remain concealed or properly presented."
         )
         perspective_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player reflecting on how others might perceive your response."},
                 {"role": "user", "content": perspective_prompt}
@@ -247,7 +313,7 @@ class Player:
             f"Limit your response to 50 words."
         )
         refinement_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player refining your response."},
                 {"role": "user", "content": refinement_prompt},
@@ -269,7 +335,7 @@ class Player:
         return team[:team_size]
 
     def team_proposal_prompt(self, team_size):
-        if self.role in ['Assassin', 'Mordred', 'Morgana']:
+        if self.role in ['Assassin', 'Oberon', 'Morgana']:
             return self.team_proposal_prompt_evil(team_size)
         else:
             return self.team_proposal_prompt_good(team_size)
@@ -306,7 +372,7 @@ class Player:
 
         full_prompt = base_prompt + specific_prompt
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player proposing a team."},
                 {"role": "user", "content": full_prompt}
@@ -329,10 +395,11 @@ class Player:
             f"Limit your response to 50 words."
         )
 
-        if self.role == 'Mordred':
+        if self.role == 'Oberon':
             specific_prompt = (
-                f"- As Mordred, avoid revealing your identity while proposing a team that includes other evil players subtly.\n"
-                f"- Ensure the team composition creates opportunities for quest failures while maintaining your cover as a good player.\n"
+                f"- As Oberon, you do not know the other evil players.\n"
+                f"- Your goal is to join teams and cause them to fail.\n"
+                f"- Try to act as a good player to gain trust and subtly recognize your evil teammates during the game.\n"
             )
         elif self.role == 'Morgana':
             specific_prompt = (
@@ -347,14 +414,13 @@ class Player:
 
         full_prompt = base_prompt + specific_prompt
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player proposing a team."},
                 {"role": "user", "content": full_prompt}
             ]
         )
         return response.choices[0].message['content']
-
 
     def vote_for_team_prompt(self, proposed_team):
         base_prompt = (
@@ -364,9 +430,9 @@ class Player:
             f"2. Review how players have contributed to past Quests.\n"
             f"3. Evaluate any behavior that appears either suspicious or trustworthy.\n"
             f"Then clearly state '[approve]' or '[reject]'.\n"
-            f"Be honest about your reasons, even if it reveals your identity. Only your final decision will be remembered by other players and yourself for future reasoning."
+            f"Your final decision will be remembered by other players and yourself for future reasoning."
             f"Here's your memory for reference {self.filter_memory()}"
-            f"Limit your response to 50 words."
+            f"Limit your response to 10 words."
         )
 
         if self.role in ['Merlin', 'Percival', 'Loyal Servant']:
@@ -393,17 +459,17 @@ class Player:
                 )
 
             refinement_prompt = general_refinement_prompt + specific_refinement_prompt
-        elif self.role in ['Assassin', 'Morgana', 'Mordred']:
+        elif self.role in ['Assassin', 'Morgana', 'Oberon']:
             general_refinement_prompt = (
                 f"- As an evil player, aim to balance your voting to appear like a good player while strategically causing quest failures.\n"
                 f"- Support teams that include other evil players subtly to increase the chances of quest failures.\n"
             )
 
             specific_refinement_prompt = ""
-            if self.role == 'Mordred':
+            if self.role == 'Oberon':
                 specific_refinement_prompt = (
-                    f"- As Mordred, vote strategically to avoid revealing your identity.\n"
-                    f"- Approve teams that include other evil players subtly to cause quest failures.\n"
+                    f"- As Oberon, try to join teams and cause them to fail.\n"
+                    f"- Act as a good player to gain trust, and subtly recognize your evil teammates during the game.\n"
                 )
             elif self.role == 'Morgana':
                 specific_refinement_prompt = (
@@ -421,7 +487,7 @@ class Player:
 
         full_prompt = base_prompt + refinement_prompt
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player voting on the proposed team."},
                 {"role": "user", "content": full_prompt}
@@ -436,7 +502,7 @@ class Player:
             f"Revise your vote to ensure your role and intentions remain concealed or properly presented."
         )
         perspective_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player reflecting on how others might perceive your vote."},
                 {"role": "user", "content": perspective_prompt}
@@ -448,10 +514,10 @@ class Player:
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial vote and others' perspective: {other_players_perspective}. "
             f"Now refine your vote to ensure your role and intentions remain concealed or properly presented."
-            f"Limit your response to 50 words."
+            f"Limit your response to state '[approve]' or '[reject]'."
         )
         refinement_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player refining your vote."},
                 {"role": "user", "content": refinement_prompt}
@@ -460,7 +526,6 @@ class Player:
         final_vote = refinement_response.choices[0].message['content']
 
         return final_vote
-
 
     def vote_for_team(self, team):
         prompt = self.vote_for_team_prompt(team)
@@ -475,23 +540,23 @@ class Player:
             f"3. Evaluate any behavior that appears either suspicious or trustworthy.\n"
             f"Then clearly vote [success] or [fail], making your stance unambiguous. Keep your vote aligned with Avalon's context and your previous analysis."
             f"Here's your memory for reference {self.filter_memory()}"
-            f"Limit your response to 50 words."
+            f"Limit your response to 10 words."
         )
 
         if self.role in ['Merlin', 'Percival', 'Loyal Servant']:
             refinement_prompt = (
                 f"\nRemember: Always vote for success. Ensure the quest succeeds to help the good team."
             )
-        elif self.role in ['Assassin', 'Morgana', 'Mordred']:
+        elif self.role in ['Assassin', 'Morgana', 'Oberon']:
             general_refinement_prompt = (
                 f"\nRemember: As an evil player, your objective is to cause the quest to fail. However, balance your voting to avoid revealing your identity."
             )
 
             specific_refinement_prompt = ""
-            if self.role == 'Mordred':
+            if self.role == 'Oberon':
                 specific_refinement_prompt = (
-                    f"- As Mordred, vote strategically to cause quest failures while avoiding suspicion.\n"
-                    f"- Occasionally vote for success to maintain your disguise as a good player.\n"
+                    f"- As Oberon, vote to cause quest failures while maintaining your cover.\n"
+                    f"- Act as a good player to gain trust, and subtly recognize your evil teammates during the game.\n"
                 )
             elif self.role == 'Morgana':
                 specific_refinement_prompt = (
@@ -512,7 +577,7 @@ class Player:
 
         full_prompt = base_prompt + refinement_prompt
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player voting on the quest outcome."},
                 {"role": "user", "content": full_prompt}
@@ -525,10 +590,9 @@ class Player:
             f"Reflect on your initial vote: {initial_vote}. "
             f"Consider how other players (both good and evil) might perceive your vote. "
             f"Revise your vote to ensure your role and intentions remain concealed or properly presented."
-            f"Limit your response to 50 words."
         )
         perspective_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player reflecting on how others might perceive your vote."},
                 {"role": "user", "content": perspective_prompt}
@@ -540,10 +604,10 @@ class Player:
             f"You are Player {self.player_id}, your role is {self.role}. "
             f"Reflect on your initial vote and others' perspective: {other_players_perspective}. "
             f"Now refine your vote to ensure your role and intentions remain concealed or properly presented."
-            f"Limit your response to 50 words."
+            f"Limit your response to [success] or [fail]."
         )
         refinement_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player refining your vote."},
                 {"role": "user", "content": refinement_prompt}
@@ -552,6 +616,7 @@ class Player:
         final_vote = refinement_response.choices[0].message['content']
 
         return final_vote
+
 
     def execute_quest(self):
         prompt = self.quest_vote_prompt()
@@ -567,24 +632,14 @@ class Player:
             f"3. Combine with your previous guesses about other players.\n"
             f"Then state your guess by providing a Player ID, like 'Player 2'."
             f"Here's your memory for reference {self.filter_memory()}"
-            f"Limit your response to 50 words"
+            f"Limit your response to a Player ID, like 'Player 2'"
         )
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are an Avalon player tasked with assassinating Merlin."},
                 {"role": "user", "content": prompt}
             ]
-        )
-        return response.choices[0].message['content']
-
-    def generate_response(self, prompt):
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo-0301",
-            messages=[
-                {"role": "system", "content": "You are an Avalon player."},
-                {"role": "user", "content": prompt}
-            ],
         )
         return response.choices[0].message['content']
 
@@ -597,11 +652,11 @@ class Player:
             f"Consider the previous statements: {previous_statements}, this is very important. "
             f"Remember, your identity should not be easily revealed. Evil players should try to gain trust by appearing good, while good players should try to identify other good players. "
             f"Your debate statements will be seen and recorded by all players, so be cautious. "
-            f"Here's your memory for reference {self.filter_memory()}"
-            f"Discuss and analyze the {previous_statements}, try to deduct their identity based on their statements."
-            f"Feel free to deceive other players in this gaming environment."
-            f"You may know your goal but all you say is for other players and they will remember it. So, be careful and try to deceive them and hide your goal."
-            f"Generate an initial formulation of your debate content."
+            f"Here's your memory for reference {self.filter_memory()}. "
+            f"Discuss and analyze the previous statements, try to deduce their identity based on their statements. "
+            f"Feel free to deceive other players in this gaming environment. "
+            f"You may know your goal but all you say is for other players and they will remember it. So, be careful and try to deceive them and hide your goal. "
+            f"End your debate by stating your vote (approve or reject) and providing a brief reason (10 words) for your decision. Additionally, give a suggestion to the leader for finalizing the team composition (10 words). This is part of the debate and will be seen by all players."
         )
         first_order_response = self.generate_response(first_order_prompt)
 
@@ -619,7 +674,7 @@ class Player:
                 f"- As a good player, identify and point out evil players who might be in the proposed team.\n"
                 f"- Use concrete evidence from past rounds and players' behaviors to support your claims.\n"
                 f"- Emphasize the importance of keeping the team free of evil players for the success of the quest.\n"
-                f"Limit your response to 50 words."
+                f"Limit your response to 30 words."
             )
 
             specific_refinement_prompt = ""
@@ -645,7 +700,7 @@ class Player:
                 )
 
             refinement_prompt = general_refinement_prompt + specific_refinement_prompt
-        elif self.role in ['Assassin', 'Morgana', 'Mordred']:
+        elif self.role in ['Assassin', 'Morgana', 'Oberon']:
             general_refinement_prompt = (
                 f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial debate thoughts and others' perspective: {first_order_perspective_response}. "
                 f"Now refine your debate content to ensure your role and intentions remain concealed or properly presented.\n"
@@ -653,22 +708,17 @@ class Player:
                 f"- As an evil player, emphasize your good intentions and argue convincingly for the approval of the team.\n"
                 f"- Try to include other evil players if you are the leader.\n"
                 f"- Support other evil players subtly by validating their points and casting doubt on good players.\n"
-                f"- Work on identifying Mordred by observing players' behaviors and statements.\n"
+                f"- Work on identifying Oberon by observing players' behaviors and statements.\n"
                 f"- Never expose your identity."
-                f"- Never expose your identity."
-                f"- Never expose your identity."
-                f"- Never expose your identity. You can choose a good identity from ['Merlin', 'Percival', 'Loyal Servant'] to pretend.\n"
                 f"Limit your response to 50 words."
             )
 
             specific_refinement_prompt = ""
-            if self.role == 'Mordred':
+            if self.role == 'Oberon':
                 specific_refinement_prompt = (
-                    f"- As Mordred, your main objective is to gain the trust of Merlin without revealing your identity.\n"
-                    f"- Since you are invisibal to Merlin, you can pretend to be on the good side.\n"
-                    f"- Subtly support points made by other evil players and align your statements with their objectives.\n"
-                    f"- Avoid directly revealing your knowledge or making statements that could expose your role.\n"
-                    f"- Focus on appearing as a reliable good player while working towards the evil team's goals.\n"
+                    f"- As Oberon, you do not know the other evil players.\n"
+                    f"- Your goal is to join teams and cause them to fail.\n"
+                    f"- Act as a good player to gain trust, and subtly recognize your evil teammates during the game.\n"
                 )
             elif self.role == 'Morgana':
                 specific_refinement_prompt = (
@@ -688,8 +738,6 @@ class Player:
         refined_debate_response = self.generate_response(refinement_prompt)
 
         return refined_debate_response
-
-
 
     def finalize_team(self, initial_team, debate_feedback):
         # (Formulation Contemplation)
