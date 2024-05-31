@@ -142,7 +142,7 @@ class Player:
     def update_core_memory_with_summary(self, memory):
         """Update core memory with role inferences and generate summary."""
         inferences = self.infer_roles_based_on_context(memory)
-        summary = "Based on my memory before, I believe that " + ", ".join([f"Player {player_id}: {role}" for player_id, (role, _) in inferences.items()])
+        summary = "Based on my memory before, I believe that " + ", ".join([f"Player {player_id} is likely to be {role}" if confidence == "likely" else f"Player {player_id} is suspected to be {role}" if confidence == "suspected" else f"Player {player_id} might be {role}" for player_id, (role, confidence) in inferences.items()])
         self.core_memory = [summary]
 
     def get_most_recent_messages(self, k):
