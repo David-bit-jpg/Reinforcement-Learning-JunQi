@@ -7,7 +7,7 @@ from pieces import Piece
 from reward_model_game import RewardModel
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-
+from dqn_agent_game import DarkChessInference
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
 
@@ -15,7 +15,8 @@ font_prop = fm.FontProperties(fname=font_path)
 class JunQiEnvGame(gym.Env):
     
     metadata = {'render.modes': ['human']}
-    def __init__(self, initial_board):
+    
+    def __init__(self, initial_board, input_size, hidden_size, output_size, lr=0.001):
         super(JunQiEnvGame, self).__init__()
         self.board_rows = 13
         self.board_cols = 5
@@ -34,6 +35,9 @@ class JunQiEnvGame(gym.Env):
         self.blue_killed = {}
         self.red_died = {}
         self.blue_died = {}
+
+        # Initialize DarkChessInference with neural network
+        self.inference_module = DarkChessInference(self, input_size, hidden_size, output_size, lr)
 
     def reset(self):
         self.board = np.zeros((self.board_rows, self.board_cols))
@@ -94,8 +98,12 @@ class JunQiEnvGame(gym.Env):
             info = {"invalid_move": False}
 
         next_state = self.get_state()
+
+        # 使用推理模型更新推理信息
+        red_infer, blue_infer = self.inference_module.infer(next_state)
         
         return next_state, reward, done, info
+
 
     def make_move(self, player_color, piece, target_position):
         if player_color != piece.get_color():

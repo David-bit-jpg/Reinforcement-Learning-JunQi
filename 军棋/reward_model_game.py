@@ -1,4 +1,6 @@
 import numpy as np
+import numpy as np
+
 class RewardModel:
     def __init__(self, red, blue, eta=0.01):
         self.eta = eta
