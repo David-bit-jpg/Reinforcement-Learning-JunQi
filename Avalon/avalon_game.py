@@ -3,7 +3,7 @@ import streamlit as st
 import numpy as np
 from player import Player
 
-class AvalonEnvironment:
+class Avalon:
     def __init__(self, num_players=7):
         self.num_players = num_players
         self.players = []
@@ -13,6 +13,7 @@ class AvalonEnvironment:
         self.current_quest = 1
         self.quest_results = []
         self.quest_history = []
+        self.current_score = {'Good': 0, 'Evil': 0}
         self.debate_history = []
         self.game_count = 0
         self.assign_roles()
@@ -62,7 +63,6 @@ class AvalonEnvironment:
             pass
 
     def get_state(self):
-        # 定义如何获取当前状态
         state = {
             "roles": [player.role for player in self.players],
             "current_quest": self.current_quest,
@@ -72,26 +72,20 @@ class AvalonEnvironment:
         return state
 
     def step(self, action):
-        # 执行动作并返回新的状态、奖励和是否结束
         reward = 0
         done = False
 
-        # 执行动作逻辑
         if action == "propose_team":
-            # 提议队伍的逻辑
             pass
         elif action == "vote_for_team":
-            # 投票的逻辑
             pass
         elif action == "execute_quest":
-            # 执行任务的逻辑
             pass
 
         next_state = self.get_state()
         return next_state, reward, done
 
     def available_actions(self):
-        # 定义当前状态下可用的动作
         actions = ["propose_team", "vote_for_team", "execute_quest"]
         return actions
 
@@ -104,6 +98,7 @@ class AvalonEnvironment:
         self.players = []
         self.assign_roles()
         self.current_leader = 0 
+        self.current_score = {'Good': 0, 'Evil': 0}
         self.current_leader_attempts = 0 
         self.game_count += 1
 
@@ -124,84 +119,95 @@ class AvalonEnvironment:
         else:
             self.history.append("Evil team has won.")
             return "Evil wins!"
-
+        
     def play_round(self):
         if self.current_quest > 5:
             return self.end_game("good_win" if sum(1 for result in self.quest_results if result.count('Fail') == 0) >= 3 else "evil_win")
 
         self.history.append("")
         leader = self.players[self.current_leader]
+
         if self.current_quest in [1]:
             team_size = 2 
         elif self.current_quest in [2,3]:
             team_size = 3 
         else:
             team_size = 4 
-        initial_team = self.nominate_team(leader, team_size)
-        final_team = self.debate(leader, initial_team)
-        votes = self.vote_for_team(leader, final_team)
-
+        initial_team = self.nominate_team(leader, team_size, self.current_score)
+        final_team = self.debate(leader, initial_team, team_size, self.current_score)
+        votes = self.vote_for_team(leader, final_team, self.current_score)
+        self.current_leader = (self.current_leader + 1) % self.num_players
         if list(votes.values()).count('Approve') > self.num_players / 2:
-            quest_result = self.execute_quest(final_team)
+            quest_result = self.execute_quest(final_team, self.current_score)
             self.quest_results.append(quest_result)
-            self.quest_history.append(f"Quest {self.current_quest} with Team member {final_team} {'Failed' if quest_result.count('Fail') > 0 else 'Successed'}")
+            self.quest_history.append(f"Quest {self.current_quest} with Team member {final_team} {'Failed' if quest_result.count('Fail') > 0 else 'Succeeded'}")
             for player in self.players:
-                player.remember_quest(f"Quest {self.current_quest} with Team member {final_team} {'Failed' if quest_result.count('Fail') > 0 else 'Successed'}")
+                player.remember_quest(f"Quest {self.current_quest} with Team member {final_team} {'Failed' if quest_result.count('Fail') > 0 else 'Succeeded'}")
             self.current_quest += 1
             self.current_leader_attempts = 0
         else:
             self.history.append(f"Team {final_team} was not approved.")
-            self.current_leader = (self.current_leader + 1) % self.num_players
             self.current_leader_attempts += 1
             if self.current_leader_attempts >= 3:
                 self.history.append("Forcing the team to go on the quest after three failed attempts.")
-                quest_result = self.execute_quest(final_team)
+                quest_result = self.execute_quest(final_team, self.current_score)
                 self.quest_results.append(quest_result)
-                self.quest_history.append(f"Quest {self.current_quest} with Team member {final_team} {'Failed' if quest_result.count('Fail') > 0 else 'Successed'}")
+                self.quest_history.append(f"Quest {self.current_quest} with Team member {final_team} {'Failed' if quest_result.count('Fail') > 0 else 'Succeeded'}")
                 for player in self.players:
-                    player.remember_quest(f"Quest {self.current_quest} with Team member {final_team} {'Failed' if quest_result.count('Fail') > 0 else 'Successed'}")
+                    player.remember_quest(f"Quest {self.current_quest} with Team member {final_team} {'Failed' if quest_result.count('Fail') > 0 else 'Succeeded'}")
                 self.current_quest += 1
                 self.current_leader_attempts = 0
-            return
-
+        for player in self.players:
+            player.update_core_memory_with_inferences(" ".join(player.short_term_memory))
         return f"Round {self.current_quest - 1} complete"
 
-    def nominate_team(self, leader, team_size):
-        team = leader.nominate_team(team_size)
+    def nominate_team(self, leader, team_size, current_score):
+        team_response = leader.nominate_team(team_size, current_score)
+        self.debate_history.append(f"<b>Leader  {leader.player_id} (Leader)</b>: {team_response}")
+        for player in self.players:
+            player.remember(f"Player {leader.player_id} (Leader): {team_response}")
+        team = leader.parse_team_from_response(team_response, team_size)
         self.history.append(f"<b>Leader {leader.player_id} nominates team: {team}</b>")
         for player in self.players:
-            player.remember(f"Leader {leader.player_id} nominates team: {team}")
+            player.remember(f"Player {leader.player_id} nominates team: {team}")
         return team
-
-    def debate(self, leader, proposed_team):
+    
+    def debate(self, leader, proposed_team, team_size, current_score):
         self.debate_history.append(f"<b>Debate for round {self.current_quest}:</b>")
         self.debate_history.append(f"Player {leader.player_id} (Leader): I propose the team: {', '.join(['Player ' + str(player) for player in proposed_team])}.")
-        
+        for player in self.players:
+            player.update_core_memory_with_inferences(" ".join(player.short_term_memory))
         # Leader's initial statement
-        leader_statement = leader.debate(proposed_team, is_leader=True)
+        leader_statement = leader.debate(proposed_team, is_leader=True, current_score=current_score)
         self.debate_history.append(f"Player {leader.player_id} (Leader): {leader_statement}")
         debate_feedback = [f"Player {leader.player_id} (Leader): {leader_statement}"]
         for player in self.players:
-                    player.remember(f"Player {leader.player_id} (Leader): {leader_statement}")
+            player.remember(f"Player {leader.player_id} (Leader): {leader_statement}")
         
         # Other players' statements
         for other_player in self.players:
             if other_player.player_id != leader.player_id:
-                statement = other_player.debate(proposed_team, previous_statements=debate_feedback)
+                statement = other_player.debate(proposed_team, previous_statements=debate_feedback, current_score=current_score)
                 self.debate_history.append(f"Player {other_player.player_id}: {statement}")
                 debate_feedback.append(f"Player {other_player.player_id}: {statement}")
                 for player in self.players:
                     player.remember(f"Player {other_player.player_id}: {statement}")
 
         # Leader finalizes the team after debate
-        final_team = leader.finalize_team(proposed_team, debate_feedback)
+        final_team_response = leader.finalize_team(proposed_team, debate_feedback, current_score)
+        self.debate_history.append(f"<b>Leader {leader.player_id}</b>: {final_team_response}")
+        debate_feedback.append(f"Player {leader.player_id}: {final_team_response}")
+        for player in self.players:
+            player.remember(f"Player {leader.player_id}: {final_team_response}")
+            
+        final_team = leader.parse_team_from_response(final_team_response, team_size)
         self.history.append(f"<b>Leader {leader.player_id} finalizes the team: {final_team}</b>")
         for player in self.players:
-            player.remember(f"Leader {leader.player_id} finalizes the team: {final_team}")
+            player.remember(f"Player {leader.player_id} finalizes the team: {final_team}")
         return final_team
 
-    def vote_for_team(self, leader, team):
-        votes = {player.player_id: player.vote_for_team(team) for player in self.players}
+    def vote_for_team(self, leader, team, current_score):
+        votes = {player.player_id: player.vote_for_team(team, current_score) for player in self.players}
         self.history.append(f"Team {team} voting results: {votes}")
         for player in self.players:
             player.remember(f"Team {team} voting results: {votes}")
@@ -212,18 +218,28 @@ class AvalonEnvironment:
             self.history.append(f"Team {team} was not approved by the majority.")
             return votes
 
-    def execute_quest(self, team):
+    def execute_quest(self, team, current_score):
         quest_result = [self.players[player_id - 1].execute_quest() for player_id in team]
-        self.history.append(f"Team {team} executes quest with results: {quest_result.count('Success')} Success, {quest_result.count('Fail')} Fail")
+        success_count = quest_result.count('Success')
+        fail_count = quest_result.count('Fail')
+
+        if fail_count > 0:
+            current_score['Evil'] += 1
+        else:
+            current_score['Good'] += 1
+
+        self.history.append(f"Team {team} executes quest with results: {success_count} Success, {fail_count} Fail")
         for player in self.players:
-            player.remember(f"Team {team} executes quest with results: {quest_result.count('Success')} Success, {quest_result.count('Fail')} Fail")
+            player.remember(f"Team {team} executes quest with results: {success_count} Success, {fail_count} Fail")
+
         return quest_result
+
 
 # Streamlit 界面代码
 st.title('Avalon Game Simulation')
 
 if 'game' not in st.session_state:
-    st.session_state.game = AvalonEnvironment()
+    st.session_state.game = Avalon()
     st.session_state.history = []
     st.session_state.result = None
     st.session_state.debate_history = []

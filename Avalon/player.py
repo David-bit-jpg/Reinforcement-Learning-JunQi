@@ -3,6 +3,7 @@ from sentence_transformers import SentenceTransformer, util
 import torch
 from zhipuai import ZhipuAI
 import re
+
 class Player:
     def __init__(self, player_id, role):
         self.player_id = player_id
@@ -13,7 +14,7 @@ class Player:
         self.is_merlin_known_by = []
         self.quest_history_memory = []
         self.core_memory_summary = []
-        self.core_memory = {i: [] for i in range(1, 8) if i != self.player_id} 
+        self.core_memory = {i: [] for i in range(1, 8) if i != self.player_id}
         self.rule_memory = []
         self.summary_cache = {}
         self.released_statement = []
@@ -21,7 +22,7 @@ class Player:
 
         # Use Sentence-BERT model
         self.sentence_bert_model = SentenceTransformer('./model/sentence-transformers/all-MiniLM-L6-v2')
-        
+
     def set_known_evil(self, known_evil):
         self.known_evil = known_evil
 
@@ -39,8 +40,7 @@ class Player:
                 ]
             )
             print(f"{self.player_id} : "  +  response.choices[0].message.content + "\n")
-            print(f"Player {self.player_id}'s Core Memory : " + str(self.core_memory) + "\n") 
-            return response.choices[0].message.content  
+            return response.choices[0].message.content
         except Exception as e:
             print(f"Error generating response: {e}")
             return ""
@@ -161,44 +161,31 @@ class Player:
         }
         return role_prompts.get(self.role, "")
 
-    def nominate_team(self, team_size):
-        prompt = self.team_proposal_prompt(team_size)
+    def nominate_team(self, team_size, current_score):
+        prompt = self.team_proposal_prompt(team_size, current_score)
 
         response = self.generate_response(prompt)
 
-        team = self.parse_team_from_response(response, team_size)
-
-        if self.player_id not in team:
-            team = team[:team_size - 1] + [self.player_id]
-
-        team = list(set(team))  # Remove duplicates
-
-        if len(team) < team_size:
-            team += random.sample([i for i in range(1, 8) if i not in team], team_size - len(team))
-
-        return team[:team_size]
+        return response
 
     def parse_team_from_response(self, response, team_size):
-        try:
-            response_str = str(response)
-            team = [int(x) for x in re.split(r"\*\*|:", response_str) if x.isdigit() and 1 <= int(x) <= 7]
-            if len(team) < team_size:
-                additional_team = [int(x) for x in re.findall(r'Player (\d+)', response_str) if 1 <= int(x) <= 7]
-                team.extend(additional_team)
-            return list(set(team))[:team_size]
-        except Exception as e:
-            print(f"Error parsing team from response: {e}")
+        # Extract player IDs from the response using regex
+        match = re.search(r'Team: ([\d, ]+)', response)
+        if match:
+            team = [int(x) for x in match.group(1).split(',') if x.strip().isdigit() and 1 <= int(x.strip()) <= 7]
+            return team[:team_size]
+        else:
             return []
 
-    def team_proposal_prompt(self, team_size):
+    def team_proposal_prompt(self, team_size, current_score):
         if self.role in ['Assassin', 'Oberon', 'Morgana']:
-            return self.team_proposal_prompt_evil(team_size)
+            return self.team_proposal_prompt_evil(team_size, current_score)
         else:
-            return self.team_proposal_prompt_good(team_size)
+            return self.team_proposal_prompt_good(team_size, current_score)
 
-    def team_proposal_prompt_good(self, team_size):
+    def team_proposal_prompt_good(self, team_size, current_score):
         base_prompt = (
-            f"You are Player {self.player_id} with role {self.role}. Current situation: Propose a team of {team_size} players. (including you)."
+            f"You are Player {self.player_id} with role {self.role}. Current situation: Propose a team of {team_size} players (including you). Current score: Good {current_score['Good']} - Evil {current_score['Evil']}. "
             f"Reflect on game history, received hints, and other players' statements.\n"
             f"Consider:\n"
             f"1. Assess each player's involvement and actions so far.\n"
@@ -206,9 +193,12 @@ class Player:
             f"3. Evaluate any behavior that appears either suspicious or trustworthy.\n"
             f"Then present your team by listing the player numbers. Provide reasons based on past events and behaviors. Do not reveal your role or hints. Usually include yourself; if not, clarify.\n"
             f"Remember: Aim for a good team without evil players."
+            f"Memory for reference:\n{self.core_memory}"
+            f"Quest Memory for reference:\n{self.quest_history_memory}"
             f"Here's your memory for reference {self.filter_memory()}"
-            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential roal of each player."
+            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential role of each player."
             f"If it's the first quest, which means your memory of past quests is none, name a team of player you trust to be on the good side."
+            f"You must give your finalized proposed team and provide the player IDs at the end of your response in this strict form like: 'Team: 1, 2, 3'."
         )
 
         specific_prompts = {
@@ -228,9 +218,9 @@ class Player:
 
         return base_prompt + specific_prompts.get(self.role, "")
 
-    def team_proposal_prompt_evil(self, team_size):
+    def team_proposal_prompt_evil(self, team_size, current_score):
         base_prompt = (
-            f"You are Player {self.player_id} with role {self.role}. Current situation: Propose a team of {team_size} players (including you)."
+            f"You are Player {self.player_id} with role {self.role}. Current situation: Propose a team of {team_size} players (including you). Current score: Good {current_score['Good']} - Evil {current_score['Evil']}. "
             f"Reflect on game history, received hints, and other players' statements.\n"
             f"Consider:\n"
             f"1. Assess each player's involvement and actions so far.\n"
@@ -239,8 +229,9 @@ class Player:
             f"Then present your team by listing the player numbers. Provide reasons based on past events and behaviors. Do not reveal your role or hints. Usually include yourself; if not, clarify.\n"
             f"Remember: To win as an evil player, you need to act like a good player. Convince good players you are trustworthy and occasionally include evil players to cause quest failures strategically."
             f"Here's your memory for reference {self.filter_memory()}"
-            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential roal of each player."
+            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential role of each player."
             f"If it's the first quest, which means your memory of past quests is none, name a team of player you trust to be on the evil side and try to deceive good players."
+            f"You must give your finalized proposed team and provide the player IDs at the end of your response in this strict form like: 'Team: 1, 2, 3'."
         )
 
         specific_prompts = {
@@ -261,10 +252,10 @@ class Player:
 
         return base_prompt + specific_prompts.get(self.role, "")
 
-    def vote_for_team_prompt(self, proposed_team):
+    def vote_for_team_prompt(self, proposed_team, current_score):
         self.update_core_memory_with_summary(self.filter_memory())
         base_prompt = (
-            f"You are Player {self.player_id} with role {self.role}. Current situation: Vote to approve or reject the proposed team: {proposed_team}.\n"
+            f"You are Player {self.player_id} with role {self.role}. Current situation: Vote to approve or reject the proposed team: {proposed_team}. Current score: Good {current_score['Good']} - Evil {current_score['Evil']}. "
             f"Consider:\n"
             f"1. Assess each player's involvement and actions in previous Quests.\n"
             f"2. Review the success or failure of past Quests and the roles of players involved.\n"
@@ -272,7 +263,7 @@ class Player:
             f"Then clearly state '[approve]' or '[reject]'.\n"
             f"Your final decision will be remembered by other players and yourself for future reasoning."
             f"Here's your memory for reference {self.filter_memory()}"
-            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential roal of each player."
+            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential role of each player."
             f"Limit your response to Player Id 1-7, must include yourself."
         )
 
@@ -306,21 +297,20 @@ class Player:
 
         return base_prompt + specific_prompts.get(self.role, "")
 
-
-    def vote_for_team(self, team):
-        prompt = self.vote_for_team_prompt(team)
+    def vote_for_team(self, team, current_score):
+        prompt = self.vote_for_team_prompt(team, current_score)
         return "Approve" if "approve" in prompt.lower() else "Reject"
 
-    def quest_vote_prompt(self):
+    def quest_vote_prompt(self, current_score):
         base_prompt = (
-            f"You are Player {self.player_id} with role {self.role}. Current situation: Vote success or fail for the Quest. "
+            f"You are Player {self.player_id} with role {self.role}. Current situation: Vote success or fail for the Quest. Current score: Good {current_score['Good']} - Evil {current_score['Evil']}. "
             f"Consider:\n"
             f"1. Assess each player's involvement and actions in previous Quests.\n"
             f"2. Review the success or failure of past Quests and the roles of players involved.\n"
             f"3. Evaluate any behavior that appears either suspicious or trustworthy.\n"
             f"Then clearly vote [success] or [fail], making your stance unambiguous. Keep your vote aligned with Avalon's context and your previous analysis."
             f"Here's your memory for reference {self.filter_memory()}"
-            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential roal of each player."
+            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential role of each player."
             f"Limit your response to [Success] or [Fail]."
         )
 
@@ -353,14 +343,13 @@ class Player:
 
         return base_prompt + specific_prompts.get(self.role, "")
 
-
-    def execute_quest(self):
-        prompt = self.quest_vote_prompt()
+    def execute_quest(self, current_score):
+        prompt = self.quest_vote_prompt(current_score)
         return "Success" if "success" in prompt.lower() else "Fail"
 
-    def assassinate_merlin_prompt(self):
+    def assassinate_merlin_prompt(self, current_score):
         prompt = (
-            f"You are Player {self.player_id} with role {self.role}. Current situation: You are evil and The evil team is close to losing; you must guess who Merlin is. "
+            f"You are Player {self.player_id} with role {self.role}. Current situation: You are evil and The evil team is close to losing; you must guess who Merlin is. Current score: Good {current_score['Good']} - Evil {current_score['Evil']}. "
             f"Consider players' past actions and behaviors to identify Merlin.\n"
             f"Consider:\n"
             f"1. Assess each player's involvement and actions so far.\n"
@@ -368,22 +357,23 @@ class Player:
             f"3. Combine with your previous guesses about other players.\n"
             f"Then state your guess by providing a Player ID, like 'Player 2'."
             f"Here's your memory for reference {self.filter_memory()}"
-            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential roal of each player."
+            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential role of each player."
             f"Limit your response to a Player ID, like 'Player 2'"
         )
         response = self.generate_response(prompt)
         return response
 
-    def debate(self, proposed_team, is_leader=False, previous_statements=[]):
+    def debate(self, proposed_team, is_leader=False, previous_statements=[], current_score={}):
         team_size = len(proposed_team)
+        players = [f'Player {player_id}' for player_id in proposed_team]
         base_prompt = (
             f"You are Player {self.player_id} with role {self.role}. {'You are the Leader of the quest.' if is_leader else ''}"
             f"{'You are the Leader of the quest and you proposed this team.' if is_leader else ''}"
             f"Here's your memory for reference {self.filter_memory()}. "
             f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential role of each player."
             f"If it's the first quest, which means your memory of past quests is none, judge the team selection based on that you observed and try to give more suggestion. (this is a way to show your trust to other players)."
-            f"Here's a proposed team of {team_size} and can only be {team_size} (including the leader)"
-            f"Debate about the proposed team of {team_size} with players: {proposed_team} (the first one is the Leader and must be included). Reflect on the team composition, the leader's reasons for choosing this team, and make inferences about the identities of other players based on the proposed team and their behaviors so far. "
+            f"Here's a proposed team of {team_size} and can only be {team_size} (including the leader). Current score: Good {current_score['Good']} - Evil {current_score['Evil']}. "
+            f"Debate about the proposed team of {team_size} with players: {', '.join(players)}. Reflect on the team composition, the leader's reasons for choosing this team, and make inferences about the identities of other players based on the proposed team and their behaviors so far. "
             f"If you are the leader, briefly explain why you chose these players."
             f"If you are chosen for the quest, briefly explain why you should be a good candidate on this Quest. A failure to establish trust among players may result in Reject of the quest vote."
             f"If you don't want the leader to be on the quest or you do not agree with this team choice, speak out and rise other players to vote for reject."
@@ -393,16 +383,17 @@ class Player:
             f"Your debate statements will be seen and recorded by all players, so be cautious. "
             f"Avoid revealing all known information at once; spread hints gradually.\n"
             f"Discuss and analyze the previous statements, try to deduce their identity based on their statements. "
-            f"Feel free to deceive and lie to other players in this gaming environment. "
+            f"You must deceive and lie to other players in this gaming environment. "
+            f"You must charge or question other players for their goodness."
             f"You may know your goal but all you say is for other players and they will remember it. So, be careful and try to deceive them and hide your goal. "
             f"End your debate by stating your vote (approve or reject) and providing a brief reason (20 words) for your decision. Additionally, give a suggestion to the leader for finalizing the team composition (20 words). This is part of the debate and will be seen by all players."
             f"Talk more about revealing other's identity, and the suggestion of team choice based on your judgment."
             f"Be brave to use other identities or pretend to deceive other players with the ability you gain from that fake identity: For example, pretending to be Percival and point out 2 players to be Merlin and Morgana to deceive others."
-            f"Evaluate how the team choice benefits your goal based on your memory, and give a suggestion of your desired team (Must include the leader)."
-            f"Finalize your debate with your opinion (approve or reject) on this current quest team with a little bit (10 words) of explanation."
-            f"If someone suspects you, do a strong rebuttal. You can shot back with words like 'Let's consider why did him suspect me?' to raise suspect to that player."
-            f"All you want to do is to gain trust around the people"
-            f"Respond in one paragraph with tone like a real, active human player!"
+            f"Use your role-specific skills to influence the game. If you are Merlin, subtly guide the good players. If you are Percival, identify and protect Merlin while misleading others. If you are an evil player, pretend to be good and create confusion."
+            f"Be mindful of your own role and your goals. Remember, your aim is to either complete quests successfully if you are a good player, or sabotage them if you are an evil player. "
+            f"Consider your memory: {self.core_memory}. Use these inferences to make your response."
+            f"Use your words to strategically lure other players to expose their identity."
+            f"Respond in one paragraph (100 words total) with a tone like a real, active human player!"
         )
 
         role_specific_prompts = {
@@ -463,45 +454,66 @@ class Player:
         }
 
         full_prompt = base_prompt + role_specific_prompts.get(self.role, "")
-        
+
         response = self.generate_response(full_prompt)
         self.released_statement.append(response)
         return response
 
-    def finalize_team(self, initial_team, debate_feedback):
-        prompts = [
-            f"Here's your memory for reference {self.filter_memory()}"
-            f"Here's your memory of past quests {self.quest_history_memory}. Consider team choice and quest results, infer the potential roal of each player."
-            f"You are Player {self.player_id} with role {self.role}. Finalize your proposed team after the debate. "
+    def finalize_team(self, initial_team, debate_feedback, current_score):
+        base_prompt = (
+            f"You are Player {self.player_id} with role {self.role}. Here are your memories for reference: {self.filter_memory()}. "
+            f"Here are your past quests: {self.quest_history_memory}. "
+            f"Consider the team choice and quest results, infer the potential role of each player. "
             f"Initial team: {initial_team}. Consider the feedback received during the debate: {debate_feedback}. "
-            f"Your final decision on the team composition will be seen and recorded by all players, so be cautious. "
-            f"Generate an initial formulation of your final decision.",
+            f"Your final decision on the team composition will be seen and recorded by all players, so be cautious. Current score: Good {current_score['Good']} - Evil {current_score['Evil']}. "
+            f"Your goal is to propose a team that aligns with your objectives. If you disagree with the feedback, state your reasons clearly. "
+            f"You must give your finalized proposed team and provide the player IDs at the end of your response in this strict form like: 'Team: 1, 2, 3'."
+            f"Limit your response to 50 words."
+        )
 
-            f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial final decision. "
-            f"Analyze how your original final decision might be interpreted by other game roles. Reflect on whether it may inadvertently reveal your role-specific clues.",
+        role_specific_prompts = {
+            "Merlin": (
+                "- As Merlin, ensure the team includes trustworthy players while avoiding known evil players. Provide subtle hints to Percival without revealing your identity. "
+                "If you disagree with the feedback, state your reasons clearly."
+            ),
+            "Percival": (
+                "- As Percival, your goal is to protect Merlin and identify trustworthy players. Ensure the team includes players you believe Merlin would trust. "
+                "If you disagree with the feedback, state your reasons clearly."
+            ),
+            "Loyal Servant": (
+                "- As a Loyal Servant, focus on proposing a team of players who have demonstrated trustworthy behavior. Avoid players who have acted suspiciously or caused quest failures. "
+                "If you disagree with the feedback, state your reasons clearly."
+            ),
+            "Morgana": (
+                "- As Morgana, your goal is to mislead the good players and include other evil players in the team. Act convincingly as Merlin to mislead Percival. "
+                "If you disagree with the feedback, state your reasons clearly."
+            ),
+            "Assassin": (
+                "- As the Assassin, your goal is to identify Merlin while sabotaging quests. Include at least one evil player in the team to increase the chances of quest failure. "
+                "If you disagree with the feedback, state your reasons clearly."
+            ),
+            "Oberon": (
+                "- As Oberon, your goal is to cause quests to fail while maintaining your cover as a good player. Act as a good player to gain trust. "
+                "If you disagree with the feedback, state your reasons clearly."
+            )
+        }
 
-            f"You are Player {self.player_id}, your role is {self.role}. Reflect on your initial final decision and others' perspective. "
-            f"Now refine your final decision to ensure your role and intentions remain concealed or properly presented."
-            f"Limit your response to 20 words"
-        ]
+        full_prompt = base_prompt + role_specific_prompts.get(self.role, "")
 
-        responses = self.generate_response(prompts)
-        final_team = [int(x) for x in responses[-1].split() if x.isdigit()]
-        if len(final_team) != len(initial_team):
-            final_team = initial_team
-        return final_team
-    
+        response = self.generate_response(full_prompt)
+        self.released_statement.append(response)
+        return response
+
     ## Memory Management ##
     def remember(self, info):
         """Store information in short-term and long-term memory."""
         self.short_term_memory.append(info)
         self.long_term_memory.append(info)
-        self.update_core_memory_with_inferences(info)
         self.forget_old_memories()
-        
+
     def remember_quest(self, info):
         self.quest_history_memory.append(info)
-    
+
     def forget_old_memories(self):
         """Selectively forget old memories from short-term and long-term memory."""
         # Forget old memories from short-term memory
@@ -518,7 +530,7 @@ class Player:
         """Check if a message is informative based on certain keywords."""
         keywords = ["Player", "Merlin", "Morgana", "Assassin", "Percival", "Loyal Servant", "Oberon", "role", "identity", "Good", "Evil", "Quest", "As"]
         return any(keyword in message for keyword in keywords)
-    
+
     def infer_roles_based_on_context(self, memory):
         """Infer roles based on memory context and conversation history."""
         if len(memory) < 1:
@@ -533,7 +545,7 @@ class Player:
                 role, confidence = value
                 if player_id in role_inferences and role_inferences[player_id] == "Unknown":
                     role_inferences[player_id] = (role, confidence)
-
+        print(f"Player {self.player_id}'s Core Memory : " + str(self.core_memory) + "\n")
         return role_inferences
 
     def calculate_trust_score(self, memory):
@@ -548,15 +560,7 @@ class Player:
                 trust_score += 1
         return trust_score
 
-    def find_conflicting_memory(self, player_id, new_role):
-        """Find conflicting memory with the current inference."""
-        for core in self.core_memory:
-            if any(f"Player {player_id} {confidence} to be {new_role}" in core for confidence in ["is likely", "is suspected", "might be"]):
-                return None
-            if new_role in core and f"Player {player_id}" not in core:
-                return core
-        return None
-
+    ##ROLE INFERENCE##
     def resolve_conflict(self, player_id, new_guess):
         """Resolve conflict based on trust scores, with preference for new guess if scores are equal."""
 
@@ -564,7 +568,7 @@ class Player:
         trust_score_existing = self.calculate_trust_score(existing_guess)
 
         trust_score_new = self.calculate_trust_score([new_guess])
-        
+
         if trust_score_new >= trust_score_existing:
             self.core_memory[player_id] = [new_guess]
         else:
@@ -572,29 +576,23 @@ class Player:
 
     def update_core_memory_with_inferences(self, info):
         """Update core memory based on inferences from context with confidence levels."""
-        quest_history = self.quest_history_memory
-        info_list = [info]
-        
-        role_guesses = self.infer_roles_based_on_context(info_list + quest_history)
-        
+        self.short_term_memory.append(info)
+        self.long_term_memory.append(info)
+
+        # Combine short term memory and quest history for role inference
+        context = self.short_term_memory + self.quest_history_memory
+
+        role_guesses = self.infer_roles_based_on_context(context)
+
         for player_id, value in role_guesses.items():
             if player_id == self.player_id:
                 continue
-            
+
             if isinstance(value, tuple) and len(value) == 2:
                 new_role, confidence = value
                 new_guess = f"Player {player_id} is {confidence} to be {new_role}"
                 new_guess = self.clean_guess_format(new_guess)
                 self.resolve_conflict(player_id, new_guess)
-                
-    def clean_guess_format(self, guess):
-        """Ensure the guess format is consistent."""
-        role_keywords = ["Merlin", "Percival", "Loyal Servant", "Assassin", "Oberon", "Morgana"]
-        for role in role_keywords:
-            if re.search(rf'\b{role}\b', guess):
-                return guess
-        # If no role found, append 'Unknown Role' for consistency
-        return guess + ' Unknown Role'
 
     def update_core_memory_with_summary(self, memory):
         quest_history = self.quest_history_memory
@@ -615,16 +613,41 @@ class Player:
 
         summary = "Based on my memory before, I believe that " + ", ".join(summary_parts)
         self.core_memory_summary = summary
-        
+
+    def infer_roles_based_on_context(self, memory):
+        """Infer roles based on memory context and conversation history."""
+        if len(memory) < 1:
+            return {player_id: ("Unknown", "Unknown") for player_id in range(1, 8) if player_id != self.player_id}
+
+        role_inferences = {player_id: ("Unknown", "Unknown") for player_id in range(1, 8) if player_id != self.player_id}
+        conversation_history = "\n".join(memory)
+        inferences = self.extract_role_inferences(conversation_history)
+
+        for player_id, value in inferences.items():
+            if isinstance(value, tuple) and len(value) == 2:
+                role, confidence = value
+                role_inferences[player_id] = (role, confidence)
+
+        return role_inferences
+
+    def clean_guess_format(self, guess):
+        """Ensure the guess format is consistent."""
+        role_keywords = ["Merlin", "Percival", "Loyal Servant", "Assassin", "Oberon", "Morgana"]
+        for role in role_keywords:
+            if re.search(rf'\b{role}\b', guess, re.IGNORECASE):  # Use case insensitive search
+                return guess
+        # If no role found, append 'Unknown Role' for consistency
+        return re.sub(r'\bLoyal\b', 'Loyal Servant', guess) if 'Loyal' in guess else guess + ' Unknown Role'
+
     def extract_role_inferences(self, response):
         inferences = {}
         prompt = (
-            f"Here's your game rule {self.rule_memory}" 
+            f"Here's your game rule {self.rule_memory}"
             "Given the rules and player introduction, infer the role of each player in the Avalon game. "
             "Here are the roles for you to select: ['Merlin', 'Percival', 'Loyal Servant', 'Loyal Servant', 'Assassin', 'Oberon', 'Morgana']\n"
             f"Conversation history for reference:\n{response}\n\n"
-            f"Memory for reference:\n{self.core_memory_summary}" 
-            f"Quest Memory for reference:\n{self.quest_history_memory}" 
+            f"Memory for reference:\n{self.core_memory_summary}"
+            f"Quest Memory for reference:\n{self.quest_history_memory}"
             "Provide your inferences in the format: 'Player X is likely to be ROLE' for high confidence, "
             "'Player X is suspected to be ROLE' for medium confidence, and 'Player X might be ROLE' for low confidence.\n"
             "Your response must follow this format strictly, without any additional things like 'the assassin'; just say the ROLE name. If you are not sure, just make a random guess with low confidence."
@@ -690,18 +713,23 @@ class Player:
             if player_id and role and confidence:
                 return f"Player {player_id} is {confidence} to be {role}"
         return None
-        
+
     def filter_memory(self):
         """Filter memory to include the most recent, informative, and reflective messages."""
         recent_messages = self.get_most_recent_messages(10)  # Freshness
         informative_messages = self.get_informative_messages(10)  # Informativeness
-        relevant_messages = self.retrieve_relevant_messages(self.get_predefined_questions(), self.short_term_memory)  # Relevancy
+        predefined_questions = self.get_predefined_questions()
+        if not predefined_questions or not self.short_term_memory:
+            relevant_messages = []
+        else:
+            relevant_messages = self.retrieve_relevant_messages(predefined_questions + [msg for msg in self.short_term_memory if msg], self.short_term_memory)  # Relevancy
+
         core_memory_list = [item for sublist in self.core_memory.values() for item in sublist]
 
         filtered_memory = recent_messages + informative_messages + relevant_messages
         all_memory = filtered_memory + core_memory_list + self.rule_memory
 
-        all_memory = [str(item) for item in all_memory]
+        all_memory = [str(item) for item in all_memory if item]  # Filter out empty strings
 
         return all_memory
 
@@ -711,52 +739,47 @@ class Player:
 
     def get_informative_messages(self, n):
         """Retrieve n most informative messages from long-term memory."""
+        if not self.long_term_memory:
+            return []
+
         informative_messages = []
-        for message in self.long_term_memory:
-            if self.is_informative(message):
-                if message not in self.summary_cache:
-                    summary = self.summarize_message(message)
-                    self.summary_cache[message] = summary
-                else:
-                    summary = self.summary_cache[message]
-                informative_messages.append(summary)
-            if len(informative_messages) >= n:
-                break
+        long_term_embeddings = self.sentence_bert_model.encode(self.long_term_memory, convert_to_tensor=True)
+        centroid_embedding = torch.mean(long_term_embeddings, dim=0)
+        distances = util.pytorch_cos_sim(centroid_embedding, long_term_embeddings)[0]
+
+        sorted_indices = torch.argsort(distances, descending=True)
+        for idx in sorted_indices[:n]:
+            informative_messages.append(self.long_term_memory[idx])
+
         return informative_messages
 
-    def summarize_message(self, message):
-        """Summarize a given message using GPT-4 model."""
-        response = self.generate_response(f"Summarize: {message}")
-        return response.strip()
+    def retrieve_relevant_messages(self, questions, memory, top_k=5):
+        """Retrieve the most relevant messages for each question."""
+        if not memory:
+            return []
 
-    def retrieve_relevant_messages(self, query, top_k=5):
-        """Retrieve relevant messages from core memory based on the query."""
-        model = self.sentence_bert_model
+        encoded_questions = self.sentence_bert_model.encode(questions, convert_to_tensor=True)
+        encoded_memory = self.sentence_bert_model.encode(memory, convert_to_tensor=True)
+        top_k = min(top_k, len(memory))
 
-        # Combine all messages from core memory into a single list
-        all_messages = []
-        for messages in self.core_memory.values():
-            all_messages.extend(messages)
+        cosine_scores = util.pytorch_cos_sim(encoded_questions, encoded_memory)
 
-        # Encode the query and all messages
-        query_embedding = model.encode(query, convert_to_tensor=True)
-        message_embeddings = model.encode(all_messages, convert_to_tensor=True)
+        top_k_values, top_k_indices = torch.topk(cosine_scores, k=top_k, dim=1)
 
-        # Compute cosine similarities
-        cos_scores = util.pytorch_cos_sim(query_embedding, message_embeddings)[0]
-
-        # Get the top k most relevant messages
-        top_results = torch.topk(cos_scores, k=top_k)
-
-        # Extract the relevant messages
-        relevant_messages = [all_messages[idx] for idx in top_results[1]]
+        relevant_messages = []
+        for i in range(len(questions)):
+            relevant_messages.append({
+                "question": questions[i],
+                "top_k_values": top_k_values[i],
+                "top_k_messages": [memory[idx.item()] for idx in top_k_indices[i]]
+            })
 
         return relevant_messages
 
     def get_predefined_questions(self):
         role_questions = {
             "Merlin": [
-                f"- As Merlin, you know the evil players are: {self.known_evil}. Did you directly speak out these name? Did you expose your identity?"
+                f"- As Merlin, you know the evil players are: {self.known_evil}. Did you directly speak out these name? Did you expose your identity?",
                 "As Merlin, how can you subtly guide the good players without revealing your identity?",
                 "What information do you have about the identities of the evil players?",
                 "How can you help Percival identify you without revealing yourself to the evil players?"
