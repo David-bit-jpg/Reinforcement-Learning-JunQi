@@ -116,14 +116,18 @@ class JunQiEnvGame(gym.Env):
         valid_actions = []
         current_pieces = None
         if player_color == 'red':
-            current_pieces = self.red_pieces 
+            current_pieces = self.red_pieces
         else:
-            current_pieces = self.blue_pieces 
+            current_pieces = self.blue_pieces
+
+        base_positions = self.get_base_positions()  # 获取所有大本营位置
+
         for piece_index, piece in enumerate(current_pieces):
-            if piece.get_position():
+            position = piece.get_position()
+            if position and position not in base_positions:  # 检查棋子不在基地里
                 valid_moves = self.get_valid_moves(piece)
                 for move in valid_moves:
-                    action = self.encode_action(player_color,piece_index, move)
+                    action = self.encode_action(player_color, piece_index, move)
                     valid_actions.append(action)
         return valid_actions
 
@@ -269,7 +273,7 @@ class JunQiEnvGame(gym.Env):
 
         if not current_position or piece.get_name() in ['军旗', '地雷']:
             return list(valid_moves)
-
+        
         # 考虑铁路上的移动
         if self.is_railway(current_position):
             if piece.get_name() == '工兵':

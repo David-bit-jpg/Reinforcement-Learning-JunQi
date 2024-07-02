@@ -192,7 +192,6 @@ class DQNAgent:
         num_opponent_pieces_tensor = torch.FloatTensor([num_opponent_pieces]).unsqueeze(0).to(self.device)
         features_tensor = torch.FloatTensor(features).unsqueeze(0).to(self.device)
 
-
         self.qnetwork_local.eval()
         self.policy_value_net.eval()
         with torch.no_grad():

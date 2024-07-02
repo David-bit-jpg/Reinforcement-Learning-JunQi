@@ -79,7 +79,12 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
         episode_moves = {'red': [], 'blue': []}
 
         for t in range(max_t):
-            action, pi, pi_reg = current_agent.act(state, env.turn, len(env.red_pieces), len(env.blue_pieces), features=[], player_color=current_player)
+            try:
+                action, pi, pi_reg = current_agent.act(state, env.turn, len(env.red_pieces), len(env.blue_pieces), features=[], player_color=current_player)
+            except ValueError as e:
+                print(e)
+                break
+            
             next_state, reward, done, info = env.step(action, pi, pi_reg, current_player)
             current_agent.step(state.flatten(), action, reward, next_state.flatten(), True)  # 每步都认为done是True
             state = next_state.flatten()
@@ -88,9 +93,9 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
             # 记录动作
             episode_moves[current_player].append(action)
 
-            # # 每30步可视化棋盘
-            # if t % 30 == 0:
-            #     env.visualize_full_board()
+            # 每30步可视化棋盘
+            if t % 30 == 0:
+                env.visualize_full_board()
 
             # 检查是否有玩家获胜
             winner = env.check_winner(current_player)
@@ -115,11 +120,11 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
         blue_moves.append(episode_moves['blue'])
 
     # 保存动作到文件
-    with open('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/red_moves.txt', 'w') as f:
+    with open('red_moves.txt', 'w') as f:
         for episode in red_moves:
             f.write(' '.join(map(str, episode)) + '\n')
 
-    with open('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/blue_moves.txt', 'w') as f:
+    with open('blue_moves.txt', 'w') as f:
         for episode in blue_moves:
             f.write(' '.join(map(str, episode)) + '\n')
 
