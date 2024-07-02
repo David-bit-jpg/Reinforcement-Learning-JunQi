@@ -1,107 +1,76 @@
-import matplotlib.pyplot as plt
-import numpy as np
 import random
 from junqi_env_game import JunQiEnvGame  # 确保你的环境文件名为 junqi_env_game.py
 from pieces import Piece
-import matplotlib.font_manager as fm
-
-font_path = '/System/Library/Fonts/PingFang.ttc'
-font_prop = fm.FontProperties(fname=font_path)
-
-def draw_piece_moves(ax, piece, env, color):
-    """
-    绘制棋子的合法移动位置
-    """
-    valid_moves = env.get_valid_moves(piece)
-    for move in valid_moves:
-        ax.plot(move[1], move[0], f'{color[0]}o')
-
-def draw_piece_position(ax, piece, color):
-    """
-    绘制棋子的位置
-    """
-    current_pos = piece.get_position()
-    ax.text(current_pos[1], current_pos[0], piece.get_name(), color=color, fontsize=12, ha='center', va='center', fontproperties=font_prop)
-
-def visualize_board(env, pieces):
-    railways = env.railways
-    roads = env.roads
-    camps = env.get_camps()
-    base_positions = env.get_base_positions()
-
-    fig, ax = plt.subplots(figsize=(8, 12))
-
-    # 绘制棋盘格子
-    ax.set_xticks(np.arange(env.board_cols + 1) - 0.5, minor=True)
-    ax.set_yticks(np.arange(env.board_rows + 1) - 0.5, minor=True)
-    ax.tick_params(which="minor", size=0)
-    ax.set_xlim(-0.5, env.board_cols - 0.5)
-    ax.set_ylim(-0.5, env.board_rows - 0.5)
-    ax.invert_yaxis()
-    ax.set_title("JunQi Board", fontproperties=font_prop)
-
-    # 绘制道路
-    for road in roads:
-        for neighbor in roads[road]:
-            if neighbor in roads:
-                ax.plot([road[1], neighbor[1]], [road[0], neighbor[0]], 'k-', lw=0.5)
-
-    # 绘制铁路
-    for railway in railways:
-        for neighbor in railways[railway]:
-            if neighbor in railways:
-                ax.plot([railway[1], neighbor[1]], [railway[0], neighbor[0]], 'k-', lw=2)
-                # 绘制黑白相间的线条
-                ax.plot([railway[1], neighbor[1]], [railway[0], neighbor[0]], 'w-', lw=1, zorder=1)
-
-    # 绘制营地
-    for camp in camps:
-        y, x = camp
-        ax.add_patch(plt.Circle((x, y), 0.3, color='green', fill=False, linewidth=2))
-
-    # 绘制大本营
-    for base in base_positions:
-        y, x = base
-        ax.add_patch(plt.Rectangle((x-0.2, y-0.2), 0.4, 0.4, color='black'))
-
-    return fig, ax
 
 def get_random_positions(env, num_positions):
     all_positions = [(x, y) for x in range(env.board_rows) for y in range(env.board_cols) if (x, y) not in [(6, 1), (6, 3)]]
     return random.sample(all_positions, num_positions)
 
-# 示例初始棋盘配置，仅包含红方棋子
+# 示例初始棋盘配置，包含红方和蓝方棋子
 initial_board = (
     [
         Piece("司令", 10, "red", []), Piece("军长", 9, "red", []), Piece("师长", 8, "red", []),
         Piece("旅长", 7, "red", []), Piece("团长", 6, "red", []), Piece("营长", 5, "red", []),
-        Piece("连长", 4, "red", []), Piece("排长", 3, "red", []), Piece("工兵", 1, "red", [])
+        Piece("连长", 4, "red", []), Piece("排长", 3, "red", []), Piece("工兵", 1, "red", []),
+        Piece("炸弹", 2, "red", []), Piece("地雷", 1, "red", []), Piece("军旗", 0, "red", [])
     ],  # Red pieces
-    []  # Blue pieces为空
+    [
+        Piece("司令", 10, "blue", []), Piece("军长", 9, "blue", []), Piece("师长", 8, "blue", []),
+        Piece("旅长", 7, "blue", []), Piece("团长", 6, "blue", []), Piece("营长", 5, "blue", []),
+        Piece("连长", 4, "blue", []), Piece("排长", 3, "blue", []), Piece("工兵", 1, "blue", []),
+        Piece("炸弹", 2, "blue", []), Piece("地雷", 1, "blue", []), Piece("军旗", 0, "blue", [])
+    ]  # Blue pieces
 )
 
 env = JunQiEnvGame(initial_board, 10, 10, 10)
 
-# 随机分配红方棋子位置，确保不重复
+# 随机分配红方和蓝方棋子位置，确保不重复
 red_positions = get_random_positions(env, len(initial_board[0]))
+blue_positions = get_random_positions(env, len(initial_board[1]))
 for i, piece in enumerate(initial_board[0]):
     piece.set_position(red_positions[i])
+for i, piece in enumerate(initial_board[1]):
+    piece.set_position(blue_positions[i])
 
 # 更新 occupied positions
 env.reset()
 
-# 固定选择红方的棋子
+# 固定选择红方和蓝方的棋子
 red_pieces = initial_board[0]
+blue_pieces = initial_board[1]
 
-# 可视化棋盘和棋子的合法移动位置
-fig, ax = visualize_board(env, red_pieces)
+def simulate_battle(env, red_piece, blue_piece):
+    target_position = blue_piece.get_position()
 
-# 展示所有红方棋子的位置
-for piece in red_pieces:
-    draw_piece_position(ax, piece, 'red')
+    # 打印战斗前状态
+    print(f"战斗前状态：")
+    print(f"红方棋子：{red_piece.get_name()} 在 {red_piece.get_position()}")
+    print(f"蓝方棋子：{blue_piece.get_name()} 在 {blue_piece.get_position()}")
 
-# 展示红方工兵的合法移动位置
-worker_piece = next(p for p in red_pieces if p.get_name() == '工兵')
-draw_piece_moves(ax, worker_piece, env, 'red')
+    # 进行战斗并更新位置
+    initial_state = env.get_state()
+    env.make_move('red', red_piece, target_position)
 
-plt.show()
+    # 检查战斗结果
+    target_piece = env.get_piece_at_position(target_position)
+    if target_piece and target_piece.get_color() != red_piece.get_color():
+        battle_result = env.battle(red_piece, target_piece)
+        if battle_result == 'win_battle':
+            print(f"红方的 {red_piece.get_name()} 吃掉了 蓝方的 {target_piece.get_name()}")
+        elif battle_result == 'lose_battle':
+            print(f"红方的 {red_piece.get_name()} 被 蓝方的 {target_piece.get_name()} 吃掉了")
+        else:
+            print(f"红方的 {red_piece.get_name()} 和 蓝方的 {target_piece.get_name()} 打成平手")
+    else:
+        print(f"没有战斗发生，红方的 {red_piece.get_name()} 移动到了 {target_position}")
+
+    # 打印战斗后状态
+    print(f"战斗后状态：")
+    print(f"红方棋子：{red_piece.get_name()} 在 {red_piece.get_position()}")
+    if target_piece:
+        print(f"蓝方棋子：{target_piece.get_name()} 在 {target_piece.get_position()}")
+
+# 随机选择一个红方和蓝方的棋子进行战斗模拟
+red_piece = random.choice(red_pieces)
+blue_piece = random.choice(blue_pieces)
+simulate_battle(env, red_piece, blue_piece)

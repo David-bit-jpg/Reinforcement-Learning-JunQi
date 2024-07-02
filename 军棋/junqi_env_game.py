@@ -8,6 +8,10 @@ from reward_model_game import RewardModel
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import traceback
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+font_path = '/System/Library/Fonts/PingFang.ttc'
+font_prop = fm.FontProperties(fname=font_path)
 class JunQiEnvGame(gym.Env):
     metadata = {'render.modes': ['human']}
     
@@ -136,9 +140,13 @@ class JunQiEnvGame(gym.Env):
             logging.warning(f"Invalid move: In turn {self.turn}, it's {player_color}'s turn. the target position {target_position} is not valid for the piece {piece}.")
             return
 
-        if not self.update_positions(piece, target_position,player_color):
-            logging.warning(f"Move failed: In turn {self.turn}, it's {player_color}'s turn. unable to move the piece {piece.get_name()} to {target_position}.")
+        target_piece = self.get_piece_at_position(target_position)
+        if target_piece and target_piece.get_color() == piece.get_color():
+            logging.warning(f"Invalid move: target position {target_position} is occupied by a friendly piece.")
             return
+
+        # 移动棋子到目标位置
+        self.update_positions(piece, target_position, player_color)
 
         # 检查是否有战斗发生
         target_piece = self.get_piece_at_position(target_position)
@@ -148,6 +156,7 @@ class JunQiEnvGame(gym.Env):
                     logging.warning(f"Cannot attack a piece in a camp at {target_position}.")
                     return  # 不能攻击在行营中的棋子
                 self.battle(piece, target_piece)
+
         
     def make_move_cpy(self, player_color, piece, target_position):
         if player_color != piece.get_color():
@@ -159,24 +168,48 @@ class JunQiEnvGame(gym.Env):
             # logging.warning(f"Invalid move: In turn {self.turn}, it's {player_color}'s turn. the target position {target_position} is not valid for the piece {piece}.")
             return
 
-        if not self.update_positions_cpy(piece, target_position,player_color):
-            # logging.warning(f"Move failed: In turn {self.turn}, it's {player_color}'s turn. unable to move the piece {piece.get_name()} to {target_position}.")
+        target_piece = self.get_piece_at_position(target_position)
+        if target_piece and target_piece.get_color() == piece.get_color():
+            # logging.warning(f"Invalid move: target position {target_position} is occupied by a friendly piece.")
             return
+
+        # 移动棋子到目标位置
+        self.update_positions(piece, target_position, player_color)
 
         # 检查是否有战斗发生
         target_piece = self.get_piece_at_position(target_position)
         if target_piece:
             if target_piece.get_color() != piece.get_color():
                 if self.is_in_camp(target_position):
-                    logging.warning(f"Cannot attack a piece in a camp at {target_position}.")
+                    # logging.warning(f"Cannot attack a piece in a camp at {target_position}.")
                     return  # 不能攻击在行营中的棋子
                 self.battle(piece, target_piece)
-
+                
     def update_positions(self, piece, target_position, player_color):
         current_position = piece.get_position()
         if current_position == target_position:
             print(f"Piece {piece.get_name()} is already at {target_position}. No update needed.")
             return False
+
+        # 移动棋子到目标位置之前，检查是否有敌方棋子
+        target_piece = self.get_piece_at_position(target_position)
+        if target_piece and target_piece.get_color() != piece.get_color():
+            print(f"Battle triggered between {piece.get_name()} and {target_piece.get_name()} at {target_position}")
+
+            # 执行战斗
+            battle_result = self.battle(piece, target_piece)
+            if battle_result == 'win_battle':
+                print(f"{piece.get_name()} wins the battle and moves to {target_position}")
+                target_piece.set_position(None)  # 移除被击败的棋子
+            elif battle_result == 'lose_battle':
+                print(f"{piece.get_name()} loses the battle and stays at {current_position}")
+                piece.set_position(None)  # 移除己方棋子
+                return False  # 不进行位置更新
+            else:
+                print(f"{piece.get_name()} and {target_piece.get_name()} both are removed (draw)")
+                piece.set_position(None)
+                target_piece.set_position(None)
+                return False  # 不进行位置更新
 
         if current_position:
             if piece.get_color() == 'red':
@@ -185,25 +218,49 @@ class JunQiEnvGame(gym.Env):
             else:
                 self.occupied_positions_blue.remove(current_position)
                 self.occupied_positions_blue.add(target_position)
-        
+
         piece.set_position(target_position)
         print(f"Player {player_color}: Updated {piece.get_name()} to {target_position}")
 
         return True
-
     
-    def update_positions_cpy(self, piece, target_position,player_color):
+    def update_positions_spy(self, piece, target_position, player_color):
         current_position = piece.get_position()
+        if current_position == target_position:
+            # print(f"Piece {piece.get_name()} is already at {target_position}. No update needed.")
+            return False
+
+        # 移动棋子到目标位置之前，检查是否有敌方棋子
+        target_piece = self.get_piece_at_position(target_position)
+        if target_piece and target_piece.get_color() != piece.get_color():
+            # print(f"Battle triggered between {piece.get_name()} and {target_piece.get_name()} at {target_position}")
+
+            # 执行战斗
+            battle_result = self.battle(piece, target_piece)
+            if battle_result == 'win_battle':
+                # print(f"{piece.get_name()} wins the battle and moves to {target_position}")
+                target_piece.set_position(None)  # 移除被击败的棋子
+            elif battle_result == 'lose_battle':
+                # print(f"{piece.get_name()} loses the battle and stays at {current_position}")
+                piece.set_position(None)  # 移除己方棋子
+                return False  # 不进行位置更新
+            else:
+                # print(f"{piece.get_name()} and {target_piece.get_name()} both are removed (draw)")
+                piece.set_position(None)
+                target_piece.set_position(None)
+                return False  # 不进行位置更新
+
         if current_position:
             if piece.get_color() == 'red':
-                if current_position in self.occupied_positions_red:
-                    self.occupied_positions_red.remove(current_position)
+                self.occupied_positions_red.remove(current_position)
                 self.occupied_positions_red.add(target_position)
             else:
-                if current_position in self.occupied_positions_blue:
-                    self.occupied_positions_blue.remove(current_position)
+                self.occupied_positions_blue.remove(current_position)
                 self.occupied_positions_blue.add(target_position)
+
         piece.set_position(target_position)
+        # print(f"Player {player_color}: Updated {piece.get_name()} to {target_position}")
+
         return True
 
     def get_valid_moves(self, piece):
@@ -617,8 +674,6 @@ class JunQiEnvGame(gym.Env):
         target_position = (position_index // self.board_cols, position_index % self.board_cols)
         return player_color, piece, target_position
 
-
-
     def check_winner(self,player_color):
         """
         检查是否有玩家获胜。
@@ -723,7 +778,6 @@ class JunQiEnvGame(gym.Env):
         Converts a piece name to its corresponding value.
         """
         value_map = {
-            '军旗': 0,
             '地雷': 1,
             '炸弹': 2,
             '司令': 3,
@@ -734,10 +788,11 @@ class JunQiEnvGame(gym.Env):
             '营长': 8,
             '连长': 9,
             '排长': 10,
-            '工兵': 11
+            '工兵': 11,
+            '军旗': 12,
         }
         return value_map.get(piece_name, 0)
-
+    
     def battle(self, piece, target_piece):
         """
         执行战斗逻辑。
@@ -745,17 +800,63 @@ class JunQiEnvGame(gym.Env):
         piece_value = self.piece_name_to_value(piece.get_name())
         target_value = self.piece_name_to_value(target_piece.get_name())
 
-        if piece_value > target_value:
+        if piece.get_name() == '炸弹' or target_piece.get_name() == '炸弹':
+            if piece.get_name() == '炸弹' and target_piece.get_name() != '炸弹':
+                piece.set_position(None)
+                target_piece.set_position(None)
+                return 'draw_battle'
+            elif piece.get_name() != '炸弹' and target_piece.get_name() == '炸弹':
+                piece.set_position(None)
+                target_piece.set_position(None)
+                return 'draw_battle'
+            elif piece.get_name() == '炸弹' and target_piece.get_name() == '炸弹':
+                piece.set_position(None)
+                target_piece.set_position(None)
+                return 'draw_battle'
+        if piece.get_name() == '工兵' and target_piece.get_name() == '地雷':
+            target_piece.set_position(None)
+            return 'win_battle'
+        if piece_value < target_value:
             target_piece.set_position(None)
             if target_piece.get_name() == '司令':
-                # 一旦司令被消灭，暴露军棋的位置
-                flag_piece = next(p for p in (self.red_pieces if target_piece.get_color() == 'red' else self.blue_pieces) if p.get_name() == '军旗')
-                flag_piece.set_position(target_piece.get_position())
+                # 一旦司令被消灭，暴露军旗的位置
+                try:
+                    flag_piece = next(p for p in (self.red_pieces if target_piece.get_color() == 'red' else self.blue_pieces) if p.get_name() == '军旗')
+                    flag_piece.set_position(target_piece.get_position())
+                except StopIteration:
+                    print(f"Warning: No flag piece found for color {target_piece.get_color()}")
             return 'win_battle'
-        elif piece_value < target_value:
+        if piece_value > target_value:
             piece.set_position(None)
             return 'lose_battle'
-        else:
+        if piece_value == target_value:
             piece.set_position(None)
             target_piece.set_position(None)
             return 'draw_battle'
+
+
+    def visualize_full_board(self):
+        board_rows, board_cols = 13, 5
+        fig, ax = plt.subplots(figsize=(8, 12))
+        ax.set_xticks(np.arange(board_cols + 1) - 0.5, minor=True)
+        ax.set_yticks(np.arange(board_rows + 1) - 0.5, minor=True)
+        ax.grid(which="minor", color="black", linestyle='-', linewidth=2)
+        ax.tick_params(which="minor", size=0)
+        ax.set_xlim(-0.5, board_cols - 0.5)
+        ax.set_ylim(-0.5, board_rows - 0.5)
+        ax.invert_yaxis()
+        ax.set_title("Full Board Deployment", fontproperties=font_prop)
+        
+        for piece in self.red_pieces:
+            pos = piece.get_position()
+            if pos is not None:
+                y, x = pos
+                ax.text(x, y, piece.get_name(), ha='center', va='center', fontsize=12, color='red', bbox=dict(facecolor='white', edgecolor='red', boxstyle='round,pad=0.3'), fontproperties=font_prop)
+
+        for piece in self.blue_pieces:
+            pos = piece.get_position()
+            if pos is not None:
+                y, x = pos
+                ax.text(x, y, piece.get_name(), ha='center', va='center', fontsize=12, color='blue', bbox=dict(facecolor='white', edgecolor='blue', boxstyle='round,pad=0.3'), fontproperties=font_prop)
+
+        plt.show()

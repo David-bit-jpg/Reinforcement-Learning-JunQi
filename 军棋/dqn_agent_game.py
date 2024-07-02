@@ -12,7 +12,6 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # 编码棋子特征
 piece_encoding = {
-    '军旗': 0,
     '地雷': 1,
     '炸弹': 2,
     '司令': 3,
@@ -23,7 +22,8 @@ piece_encoding = {
     '营长': 8,
     '连长': 9,
     '排长': 10,
-    '工兵': 11
+    '工兵': 11,
+    '军旗': 12,
 }
 
 class DuelingQNetwork(nn.Module):

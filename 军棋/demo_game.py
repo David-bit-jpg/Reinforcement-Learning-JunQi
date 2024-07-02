@@ -94,6 +94,7 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
             else:
                 current_player = 'red'
                 current_agent = agent_red
+            env.visualize_full_board()
 
         scores.append(score)
         eps = max(epsilon_end, epsilon_decay * eps)
