@@ -94,7 +94,7 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
             episode_moves[current_player].append(action)
 
             # 每30步可视化棋盘
-            if t % 30 == 0:
+            if t % 60 == 0:
                 env.visualize_full_board()
 
             # 检查是否有玩家获胜
@@ -139,7 +139,7 @@ agent_red = DQNAgent(state_size, action_size, env, seed=0)
 agent_blue = DQNAgent(state_size, action_size, env, seed=1)
 
 num_episodes = 1000
-max_t = 100
+max_t = 1000
 epsilon_start = 1.0
 epsilon_end = 0.01
 epsilon_decay = 0.995

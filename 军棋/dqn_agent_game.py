@@ -184,7 +184,7 @@ class DQNAgent:
 
         state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).to(self.device)  # 调整维度
         state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)  # 确保是 (1, 3, board_rows, board_cols)
-    
+
         prob_matrix = self.get_prob_matrix(state)
         prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.device)
         turn_tensor = torch.FloatTensor([turn]).unsqueeze(0).to(self.device)
@@ -198,7 +198,7 @@ class DQNAgent:
             action_values = self.qnetwork_local(state_tensor).squeeze()  # 确保 action_values 是 1 维张量
             policy, value_estimation = self.policy_value_net(state_tensor, prob_matrix_tensor, turn_tensor, num_own_pieces_tensor, num_opponent_pieces_tensor, features_tensor)
             self.pi = policy.cpu().numpy().flatten()  # 更新 pi 为最新策略
-            self.pi_reg = self.pi.copy() 
+            self.pi_reg = self.pi.copy()
             policy = policy.squeeze()  # 确保 policy 是 1 维张量
             if value_estimation.dim() == 0:
                 value_estimation = value_estimation.unsqueeze(0)  # 如果 value_estimation 是标量，则扩展为 1 维张量
@@ -237,6 +237,8 @@ class DQNAgent:
         print(f"Selected action: {action}")
         return action, self.pi, self.pi_reg
 
+
+
     def step(self, state, action, reward, next_state, done):
         if action >= len(self.pi):
             self.pi = np.pad(self.pi, (0, action - len(self.pi) + 1), 'constant', constant_values=0)
@@ -257,6 +259,10 @@ class DQNAgent:
         Q_targets_next = self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1)
         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
 
+        # 确保动作索引不超过当前Q网络的动作维度
+        max_action_idx = self.qnetwork_local(states).size(1) - 1
+        actions = torch.clamp(actions, 0, max_action_idx)
+
         Q_expected = self.qnetwork_local(states).gather(1, actions)
 
         loss = (Q_expected - Q_targets).pow(2) * weights
@@ -266,12 +272,14 @@ class DQNAgent:
         loss.backward()
         self.optimizer.step()
 
-        self.memory.update_priorities(indices, loss.detach().cpu().numpy())
+        # 将 loss 转换为一维数组
+        self.memory.update_priorities(indices, loss.detach().cpu().numpy().reshape(-1))
 
         self.soft_update(self.qnetwork_local, self.qnetwork_target, self.tau)
 
         q_values = self.qnetwork_local(states).detach().cpu().numpy()
         self.pi = self.replicator_dynamics_update(self.pi, q_values.mean(axis=0))
+
 
     def replicator_dynamics_update(self, pi, q_values, learning_rate=0.01):
         new_pi = pi * np.exp(learning_rate * q_values)
