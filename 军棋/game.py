@@ -1,13 +1,33 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import random
 from junqi_env_game import JunQiEnvGame  # 确保你的环境文件名为 junqi_env_game.py
+from pieces import Piece
+import matplotlib.font_manager as fm
 
-def visualize_board(env):
+font_path = '/System/Library/Fonts/PingFang.ttc'
+font_prop = fm.FontProperties(fname=font_path)
+
+def draw_piece_moves(ax, piece, env, color):
+    """
+    绘制棋子的合法移动位置
+    """
+    valid_moves = env.get_valid_moves(piece)
+    for move in valid_moves:
+        ax.plot(move[1], move[0], f'{color[0]}o')
+
+def draw_piece_position(ax, piece, color):
+    """
+    绘制棋子的位置
+    """
+    current_pos = piece.get_position()
+    ax.text(current_pos[1], current_pos[0], piece.get_name(), color=color, fontsize=12, ha='center', va='center', fontproperties=font_prop)
+
+def visualize_board(env, pieces):
     railways = env.railways
     roads = env.roads
     camps = env.get_camps()
     base_positions = env.get_base_positions()
-    positions = [(x, y) for x in range(env.board_rows) for y in range(env.board_cols) if (x, y) not in [(6, 1), (6, 3)]]
 
     fig, ax = plt.subplots(figsize=(8, 12))
 
@@ -18,7 +38,7 @@ def visualize_board(env):
     ax.set_xlim(-0.5, env.board_cols - 0.5)
     ax.set_ylim(-0.5, env.board_rows - 0.5)
     ax.invert_yaxis()
-    ax.set_title("JunQi Board")
+    ax.set_title("JunQi Board", fontproperties=font_prop)
 
     # 绘制道路
     for road in roads:
@@ -44,29 +64,44 @@ def visualize_board(env):
         y, x = base
         ax.add_patch(plt.Rectangle((x-0.2, y-0.2), 0.4, 0.4, color='black'))
 
-    # 绘制棋子可放置的位置
-    for pos in positions:
-        y, x = pos
-        ax.plot(x, y, 'bo')
+    return fig, ax
 
-    plt.show()
+def get_random_positions(env, num_positions):
+    all_positions = [(x, y) for x in range(env.board_rows) for y in range(env.board_cols) if (x, y) not in [(6, 1), (6, 3)]]
+    return random.sample(all_positions, num_positions)
 
-# 创建JunQiEnvGame环境
-class DummyPiece:
-    def __init__(self, name, position):
-        self.name = name
-        self.position = position
-
-    def get_position(self):
-        return self.position
-
-# 示例初始棋盘配置
+# 示例初始棋盘配置，仅包含红方棋子
 initial_board = (
-    [DummyPiece("军旗", (0, 0)), DummyPiece("地雷", (1, 1))],  # Red pieces
-    [DummyPiece("军旗", (2, 2)), DummyPiece("地雷", (3, 3))]   # Blue pieces
+    [
+        Piece("司令", 10, "red", []), Piece("军长", 9, "red", []), Piece("师长", 8, "red", []),
+        Piece("旅长", 7, "red", []), Piece("团长", 6, "red", []), Piece("营长", 5, "red", []),
+        Piece("连长", 4, "red", []), Piece("排长", 3, "red", []), Piece("工兵", 1, "red", [])
+    ],  # Red pieces
+    []  # Blue pieces为空
 )
 
-env = JunQiEnvGame(initial_board)
+env = JunQiEnvGame(initial_board, 10, 10, 10)
 
-# 可视化棋盘
-visualize_board(env)
+# 随机分配红方棋子位置，确保不重复
+red_positions = get_random_positions(env, len(initial_board[0]))
+for i, piece in enumerate(initial_board[0]):
+    piece.set_position(red_positions[i])
+
+# 更新 occupied positions
+env.reset()
+
+# 固定选择红方的棋子
+red_pieces = initial_board[0]
+
+# 可视化棋盘和棋子的合法移动位置
+fig, ax = visualize_board(env, red_pieces)
+
+# 展示所有红方棋子的位置
+for piece in red_pieces:
+    draw_piece_position(ax, piece, 'red')
+
+# 展示红方工兵的合法移动位置
+worker_piece = next(p for p in red_pieces if p.get_name() == '工兵')
+draw_piece_moves(ax, worker_piece, env, 'red')
+
+plt.show()

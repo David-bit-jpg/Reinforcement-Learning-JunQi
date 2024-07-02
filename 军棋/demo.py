@@ -2,17 +2,17 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from dqn_agent_setup import DQNAgent
-from junqi_env_setup import JunQiEnv
+from junqi_env_setup import JunQiEnvSetUp
 
 
 # 创建环境和智能体
-env = JunQiEnv()
+env = JunQiEnvSetUp()
 state_size = env.observation_space.shape[0] * env.observation_space.shape[1] * env.observation_space.shape[2]
 action_size = env.get_action_space_size()
 agent = DQNAgent(state_size, action_size, env, seed=0)
 
 # 加载训练好的模型权重
-agent.qnetwork_local.load_state_dict(torch.load('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/modles/setup_model.pth'))
+agent.qnetwork_local.load_state_dict(torch.load('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/setup_model.pth'))
 
 # 设置模型为评估模式
 agent.qnetwork_local.eval()

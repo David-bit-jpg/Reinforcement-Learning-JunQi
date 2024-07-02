@@ -9,10 +9,10 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
-class JunQiEnv(gym.Env):
+class JunQiEnvSetUp(gym.Env):
     metadata = {'render.modes': ['human']}
     def __init__(self):
-        super(JunQiEnv, self).__init__()
+        super(JunQiEnvSetUp, self).__init__()
         self.board_rows = 13
         self.board_cols = 5
         self.railways = self.define_railways()

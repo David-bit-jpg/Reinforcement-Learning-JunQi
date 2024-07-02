@@ -1,7 +1,7 @@
 import random
 import streamlit as st
 import numpy as np
-from player import Player
+from player_backup import Player
 
 class Avalon:
     def __init__(self, num_players=7):

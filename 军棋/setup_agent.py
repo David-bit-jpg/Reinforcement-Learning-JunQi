@@ -4,7 +4,7 @@ import random
 from collections import deque
 import matplotlib.pyplot as plt
 from dqn_agent_setup import DQNAgent
-from junqi_env_setup import JunQiEnv
+from junqi_env_setup import JunQiEnvSetUp
 
 def dqn(n_episodes=10000, max_t=1000, eps_start=1.0, eps_end=0.01, eps_decay=0.995):
     scores = []
@@ -37,7 +37,7 @@ def dqn(n_episodes=10000, max_t=1000, eps_start=1.0, eps_end=0.01, eps_decay=0.9
     return scores
 
 # 创建环境和智能体
-env = JunQiEnv()
+env = JunQiEnvSetUp()
 state_size = env.observation_space.shape[0] * env.observation_space.shape[1] * env.observation_space.shape[2]
 action_size = env.get_action_space_size()
 agent = DQNAgent(state_size, action_size, env, seed=0)

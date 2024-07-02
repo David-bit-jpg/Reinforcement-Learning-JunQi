@@ -13,10 +13,10 @@ from junqi_env_setup import JunQiEnvSetUp
 MODEL_SAVE_PATH = "/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_model.pth"
 os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
 
-env_setup = JunQiEnvSetUp()
-state_size = env_setup.observation_space.shape[0] * env_setup.observation_space.shape[1] * env_setup.observation_space.shape[2]
-action_size = env_setup.get_action_space_size()
-agent = DQNAgentSetUp(state_size, action_size, env_setup, seed=0)
+env = JunQiEnvSetUp()
+state_size = env.observation_space.shape[0] * env.observation_space.shape[1] * env.observation_space.shape[2]
+action_size = env.get_action_space_size()
+agent = DQNAgentSetUp(state_size, action_size, env, seed=0)
 
 # 加载训练好的模型权重
 agent.qnetwork_local.load_state_dict(torch.load('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/setup_model.pth'))
@@ -44,10 +44,10 @@ def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
             break
 
 # 生成布局
-generate_deployment(env_setup, agent, epsilon=0.2)  # 调整 epsilon 值来控制随机性
+generate_deployment(env, agent, epsilon=0.2)  # 调整 epsilon 值来控制随机性
 
-red_pieces = env_setup.red_pieces
-blue_pieces = env_setup.blue_pieces
+red_pieces = env.red_pieces
+blue_pieces = env.blue_pieces
 
 # 定义训练超参数
 BATCH_SIZE = 64
@@ -115,6 +115,3 @@ epsilon_start = 1.0
 epsilon_end = 0.01
 epsilon_decay = 0.995
 trained_agent_red, trained_agent_blue = train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay)
-# 保存模型
-torch.save(trained_agent_red.qnetwork_local.state_dict(), '/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_agent_red.pth')
-torch.save(trained_agent_blue.qnetwork_local.state_dict(), '/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_agent_blue.pth')
