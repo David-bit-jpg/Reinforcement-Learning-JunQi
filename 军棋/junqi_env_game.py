@@ -194,19 +194,19 @@ class JunQiEnvGame(gym.Env):
         # 移动棋子到目标位置之前，检查是否有敌方棋子
         target_piece = self.get_piece_at_position(target_position)
         if target_piece and target_piece.get_color() != piece.get_color():
-            print(f"Battle triggered between {piece.get_name()} and {target_piece.get_name()} at {target_position}")
+            # print(f"Battle triggered between {piece.get_name()} and {target_piece.get_name()} at {target_position}")
 
             # 执行战斗
             battle_result = self.battle(piece, target_piece)
             if battle_result == 'win_battle':
-                print(f"{piece.get_name()} wins the battle and moves to {target_position}")
+                # print(f"{piece.get_name()} wins the battle and moves to {target_position}")
                 target_piece.set_position(None)  # 移除被击败的棋子
             elif battle_result == 'lose_battle':
-                print(f"{piece.get_name()} loses the battle and stays at {current_position}")
+                # print(f"{piece.get_name()} loses the battle and stays at {current_position}")
                 piece.set_position(None)  # 移除己方棋子
                 return False  # 不进行位置更新
             else:
-                print(f"{piece.get_name()} and {target_piece.get_name()} both are removed (draw)")
+                # print(f"{piece.get_name()} and {target_piece.get_name()} both are removed (draw)")
                 piece.set_position(None)
                 target_piece.set_position(None)
                 return False  # 不进行位置更新
@@ -220,7 +220,7 @@ class JunQiEnvGame(gym.Env):
                 self.occupied_positions_blue.add(target_position)
 
         piece.set_position(target_position)
-        print(f"Player {player_color}: Updated {piece.get_name()} to {target_position}")
+        # print(f"Player {player_color}: Updated {piece.get_name()} to {target_position}")
 
         return True
     

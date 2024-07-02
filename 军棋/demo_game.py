@@ -94,7 +94,7 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
             else:
                 current_player = 'red'
                 current_agent = agent_red
-            env.visualize_full_board()
+            # env.visualize_full_board()
 
         scores.append(score)
         eps = max(epsilon_end, epsilon_decay * eps)
@@ -111,7 +111,7 @@ agent_red = DQNAgent(state_size, action_size, env, seed=0)
 agent_blue = DQNAgent(state_size, action_size, env, seed=1)
 
 num_episodes = 1000
-max_t = 100
+max_t = 1000
 epsilon_start = 1.0
 epsilon_end = 0.01
 epsilon_decay = 0.995
