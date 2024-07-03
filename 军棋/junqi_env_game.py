@@ -10,8 +10,156 @@ import matplotlib.font_manager as fm
 import traceback
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import copy
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
+
+piece_encoding = {
+    '地雷': 1,
+    '炸弹': 2,
+    '司令': 3,
+    '军长': 4,
+    '师长': 5,
+    '旅长': 6,
+    '团长': 7,
+    '营长': 8,
+    '连长': 9,
+    '排长': 10,
+    '工兵': 11,
+    '军旗': 12,
+}
+class InferenceModel:
+    def __init__(self, board_rows, board_cols, piece_types):
+        self.board_rows = board_rows
+        self.board_cols = board_cols
+        self.piece_types = piece_types
+        self.belief = np.ones((board_rows, board_cols, len(piece_types))) / len(piece_types)
+        self.move_history = []
+        self.battle_history = []
+        self.stationary_pieces = {}  # 记录长时间不动的棋子
+
+    def update_belief(self, observations, move_history, battle_history):
+        self.move_history.extend(move_history)
+        self.battle_history.extend(battle_history)
+
+        # 更新基于观察的信念
+        self.update_belief_from_observations(observations)
+        
+        # 更新基于走路历史的信念
+        self.update_belief_from_move_history()
+
+        # 更新基于战斗历史的信念
+        self.update_belief_from_battle_history()
+
+        # 更新基于站位的信念
+        self.update_belief_from_stationary_pieces()
+
+    def update_belief_from_observations(self, observations):
+        for pos, piece_type in observations.items():
+            x, y = pos
+            self.belief[x, y, :] = 0
+            self.belief[x, y, self.piece_types.index(piece_type)] = 1
+            self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
+
+    def update_belief_from_move_history(self):
+        for move in self.move_history:
+            piece, start_pos, end_pos = move
+            x, y = end_pos
+            piece_type = piece.get_name()
+
+            if piece_type == '工兵':
+                self.belief[x, y, :] *= 1.5  # 提高工兵位置的概率
+            else:
+                self.belief[x, y, :] *= 1.1  # 其他棋子的位置稍微提高概率
+            self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
+
+            # 检查大棋子附近的位置
+            if piece_type in ['司令', '军长']:
+                for nx, ny in self.get_neighboring_positions(end_pos):
+                    if self.is_valid_position((nx, ny)):
+                        self.belief[nx, ny, self.piece_types.index('炸弹')] *= 1.5
+                        self.belief[nx, ny, :] /= np.sum(self.belief[nx, ny, :])
+
+    def update_belief_from_battle_history(self):
+        for battle in self.battle_history:
+            attacker, defender, result = battle
+            
+            # 检查攻击者和防守者是否都还在棋盘上
+            if attacker.get_position() is not None:
+                attacker_x, attacker_y = attacker.get_position()
+            else:
+                attacker_x, attacker_y = None, None
+            
+            if defender.get_position() is not None:
+                defender_x, defender_y = defender.get_position()
+            else:
+                defender_x, defender_y = None, None
+
+            if result == 'win':
+                if attacker_x is not None and attacker_y is not None:
+                    self.belief[attacker_x, attacker_y, :] *= 1.2  # 增加攻击者位置上高价值棋子的概率
+                    self.belief[attacker_x, attacker_y, :] /= np.sum(self.belief[attacker_x, attacker_y, :])
+                if defender_x is not None and defender_y is not None:
+                    self.belief[defender_x, defender_y, :] *= 0.8  # 减少被击败者位置上高价值棋子的概率
+                    self.belief[defender_x, defender_y, :] /= np.sum(self.belief[defender_x, defender_y, :])
+            elif result == 'lose':
+                if attacker_x is not None and attacker_y is not None:
+                    self.belief[attacker_x, attacker_y, :] *= 0.8  # 减少攻击者位置上高价值棋子的概率
+                    self.belief[attacker_x, attacker_y, :] /= np.sum(self.belief[attacker_x, attacker_y, :])
+                if defender_x is not None and defender_y is not None:
+                    self.belief[defender_x, defender_y, :] *= 1.2  # 增加防守者位置上高价值棋子的概率
+                    self.belief[defender_x, defender_y, :] /= np.sum(self.belief[defender_x, defender_y, :])
+
+            # 更新站位信息
+            if result == 'win' and attacker_x is not None and attacker_y is not None:
+                if (attacker_x, attacker_y) in self.stationary_pieces:
+                    self.stationary_pieces[(attacker_x, attacker_y)]['wins'] += 1
+                else:
+                    self.stationary_pieces[(attacker_x, attacker_y)] = {'wins': 1, 'moves': 0}
+            elif result == 'lose' and defender_x is not None and defender_y is not None:
+                if (defender_x, defender_y) in self.stationary_pieces:
+                    self.stationary_pieces[(defender_x, defender_y)]['wins'] += 1
+                else:
+                    self.stationary_pieces[(defender_x, defender_y)] = {'wins': 1, 'moves': 0}
+
+
+    def update_belief_from_stationary_pieces(self):
+        for pos, data in self.stationary_pieces.items():
+            if data['moves'] == 0 and data['wins'] == 0:
+                self.belief[pos[0], pos[1], self.piece_types.index('炸弹')] *= 1.5
+                self.belief[pos[0], pos[1], :] /= np.sum(self.belief[pos[0], pos[1], :])
+            elif data['wins'] > 2:
+                high_value_pieces = ['司令', '军长', '师长']
+                for piece in high_value_pieces:
+                    self.belief[pos[0], pos[1], self.piece_types.index(piece)] *= 1.2
+                self.belief[pos[0], pos[1], :] /= np.sum(self.belief[pos[0], pos[1], :])
+
+    def infer_opponent_pieces(self):
+        inferred_pieces = {}
+        for x in range(self.board_rows):
+            for y in range(self.board_cols):
+                piece_type_index = np.argmax(self.belief[x, y, :])
+                piece_type = self.piece_types[piece_type_index]
+                inferred_pieces[(x, y)] = piece_type
+        return inferred_pieces
+
+    def get_neighboring_positions(self, position):
+        x, y = position
+        neighbors = []
+        if x > 0:
+            neighbors.append((x - 1, y))
+        if x < self.board_rows - 1:
+            neighbors.append((x + 1, y))
+        if y > 0:
+            neighbors.append((x, y - 1))
+        if y < self.board_cols - 1:
+            neighbors.append((x, y + 1))
+        return neighbors
+
+    def is_valid_position(self, position):
+        x, y = position
+        return 0 <= x < self.board_rows and 0 <= y < self.board_cols
+
 class JunQiEnvGame(gym.Env):
     metadata = {'render.modes': ['human']}
     
@@ -30,6 +178,13 @@ class JunQiEnvGame(gym.Env):
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.board_rows, self.board_cols, 3), dtype=np.float32)
         self.pi = None
         self.pi_reg = None
+        
+        piece_types = list(piece_encoding.keys())
+        self.inference_model = InferenceModel(self.board_rows, self.board_cols, piece_types)
+
+        self.move_history = []
+        self.battle_history = []
+
         self.reset()
 
     def reset(self):
@@ -46,22 +201,23 @@ class JunQiEnvGame(gym.Env):
                 self.occupied_positions_blue.add(position)
         self.state = 'play'
         self.turn = 0
+        self.inference_model = InferenceModel(self.board_rows, self.board_cols, list(piece_encoding.keys()))
+        self.move_history = []
+        self.battle_history = []
         return self.get_state()
 
     def get_state(self):
-        state = np.zeros((self.board_rows, self.board_cols, 3))  # 确保 state 有 3 个通道
+        state = np.zeros((self.board_rows, self.board_cols, 3))
         for piece in self.red_pieces:
             if piece.position:
                 x, y = piece.position
                 if 0 <= x < self.board_rows and 0 <= y < self.board_cols:
                     state[x, y, 0] = 1
-
         for piece in self.blue_pieces:
             if piece.position:
                 x, y = piece.position
                 if 0 <= x < self.board_rows and 0 <= y < self.board_cols:
                     state[x, y, 1] = 1
-
         return state
 
     def get_state_size(self):
@@ -79,38 +235,64 @@ class JunQiEnvGame(gym.Env):
         initial_state = self.get_state()
         self.make_move(current_player_color, piece, target_position)
 
+        # 更新信念状态
+        observations = self.get_observation()
+        move_history = self.get_move_history()
+        battle_history = self.get_battle_history()
+        self.inference_model.update_belief(observations, move_history, battle_history)
+
         # 其他逻辑
         next_state = self.get_state()
-        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg,player_color)
+        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg, player_color)
         if current_player_color == 'red' and self.check_winner(current_player_color) == 'red_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg,player_color)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color)
         elif current_player_color == 'blue' and self.check_winner(current_player_color) == 'blue_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg,player_color)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color)
         done = True  # 每次移动一个棋子后即结束
         info = {"invalid_move": reward < 0}
         return next_state, reward, done, info
 
-
-    def step_cpy(self, action, pi, pi_reg,current_player_color):
+    def step_with_inference(self, action, pi, pi_reg, current_player_color):
         player_color, piece, target_position = self.decode_action(action)
         if piece.get_color() != current_player_color:
             logging.warning(f"Invalid action: In turn {self.turn}, it's {current_player_color}'s turn, but the piece is {piece.get_color()} {piece.get_name()}.")
             return self.get_state(), -1, True, {}  # 返回一个负奖励并结束该回合
-
         initial_state = self.get_state()
-        self.make_move_cpy(current_player_color, piece, target_position)
+
+        # 使用推理模型来推测对手棋子的状态
+        inferred_pieces = self.inference_model.infer_opponent_pieces()
+
+        # 创建环境副本并设置推测状态
+        env_copy = copy.deepcopy(self)
+        for (x, y), piece_type in inferred_pieces.items():
+            if piece_type != '':  # 确保推测的棋子类型有效
+                rank = piece_encoding[piece_type]
+                color = 'blue' if current_player_color == 'red' else 'red'
+                valid_positions = self.railways.get((x, y), []) + self.roads.get((x, y), [])
+                inferred_piece = Piece(piece_type, rank, color, valid_positions)
+                inferred_piece.set_position((x, y))
+                env_copy.update_positions(inferred_piece, (x, y), inferred_piece.get_color())
+
+        env_copy.make_move_cpy(current_player_color, piece, target_position)
 
         # 其他逻辑
-        next_state = self.get_state()
-        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg,player_color)
+        next_state = env_copy.get_state()
+        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg, player_color)
         if current_player_color == 'red' and self.check_winner(current_player_color) == 'red_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg,player_color)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color)
         elif current_player_color == 'blue' and self.check_winner(current_player_color) == 'blue_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg,player_color)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color)
         done = True  # 每次移动一个棋子后即结束
         info = {"invalid_move": reward < 0}
         return next_state, reward, done, info
-
+    
+    def get_observation(self):
+        observations = {}
+        for piece in self.red_pieces + self.blue_pieces:
+            pos = piece.get_position()
+            if pos:
+                observations[pos] = piece.get_name()
+        return observations
 
     def get_valid_actions(self, player_color):
         valid_actions = []
@@ -138,7 +320,7 @@ class JunQiEnvGame(gym.Env):
         if player_color != piece.get_color():
             logging.warning(f"Invalid action: In turn {self.turn}, it's {player_color}'s turn, but the piece is {piece.get_color()} {piece.get_name()}.")
             return
-        
+
         valid_moves = self.get_valid_moves(piece)
         if target_position not in valid_moves:
             logging.warning(f"Invalid move: In turn {self.turn}, it's {player_color}'s turn. the target position {target_position} is not valid for the piece {piece}.")
@@ -148,6 +330,9 @@ class JunQiEnvGame(gym.Env):
         if target_piece and target_piece.get_color() == piece.get_color():
             logging.warning(f"Invalid move: target position {target_position} is occupied by a friendly piece.")
             return
+
+        # 记录移动历史
+        self.move_history.append((piece, piece.get_position(), target_position))
 
         # 移动棋子到目标位置
         self.update_positions(piece, target_position, player_color)
@@ -161,12 +346,11 @@ class JunQiEnvGame(gym.Env):
                     return  # 不能攻击在行营中的棋子
                 self.battle(piece, target_piece)
 
-        
     def make_move_cpy(self, player_color, piece, target_position):
         if player_color != piece.get_color():
             # logging.warning(f"Invalid action: In turn {self.turn}, it's {player_color}'s turn, but the piece is {piece.get_color()} {piece.get_name()}.")
             return
-        
+
         valid_moves = self.get_valid_moves(piece)
         if target_position not in valid_moves:
             # logging.warning(f"Invalid move: In turn {self.turn}, it's {player_color}'s turn. the target position {target_position} is not valid for the piece {piece}.")
@@ -176,6 +360,9 @@ class JunQiEnvGame(gym.Env):
         if target_piece and target_piece.get_color() == piece.get_color():
             # logging.warning(f"Invalid move: target position {target_position} is occupied by a friendly piece.")
             return
+
+        # 记录移动历史
+        self.move_history.append((piece, piece.get_position(), target_position))
 
         # 移动棋子到目标位置
         self.update_positions(piece, target_position, player_color)
@@ -188,85 +375,74 @@ class JunQiEnvGame(gym.Env):
                     # logging.warning(f"Cannot attack a piece in a camp at {target_position}.")
                     return  # 不能攻击在行营中的棋子
                 self.battle(piece, target_piece)
-                
+
     def update_positions(self, piece, target_position, player_color):
         current_position = piece.get_position()
         if current_position == target_position:
-            print(f"Piece {piece.get_name()} is already at {target_position}. No update needed.")
             return False
 
         # 移动棋子到目标位置之前，检查是否有敌方棋子
         target_piece = self.get_piece_at_position(target_position)
         if target_piece and target_piece.get_color() != piece.get_color():
-            # print(f"Battle triggered between {piece.get_name()} and {target_piece.get_name()} at {target_position}")
-
             # 执行战斗
             battle_result = self.battle(piece, target_piece)
+            self.battle_history.append((piece, target_piece, battle_result))  # 记录战斗历史
             if battle_result == 'win_battle':
-                # print(f"{piece.get_name()} wins the battle and moves to {target_position}")
                 target_piece.set_position(None)  # 移除被击败的棋子
             elif battle_result == 'lose_battle':
-                # print(f"{piece.get_name()} loses the battle and stays at {current_position}")
                 piece.set_position(None)  # 移除己方棋子
                 return False  # 不进行位置更新
             else:
-                # print(f"{piece.get_name()} and {target_piece.get_name()} both are removed (draw)")
                 piece.set_position(None)
                 target_piece.set_position(None)
                 return False  # 不进行位置更新
 
         if current_position:
             if piece.get_color() == 'red':
-                self.occupied_positions_red.remove(current_position)
+                if current_position in self.occupied_positions_red:
+                    self.occupied_positions_red.remove(current_position)
                 self.occupied_positions_red.add(target_position)
             else:
-                self.occupied_positions_blue.remove(current_position)
+                if current_position in self.occupied_positions_blue:
+                    self.occupied_positions_blue.remove(current_position)
                 self.occupied_positions_blue.add(target_position)
 
         piece.set_position(target_position)
-        # print(f"Player {player_color}: Updated {piece.get_name()} to {target_position}")
-
         return True
     
-    def update_positions_spy(self, piece, target_position, player_color):
+    def update_positions_cpy(self, piece, target_position, player_color):
         current_position = piece.get_position()
         if current_position == target_position:
-            # print(f"Piece {piece.get_name()} is already at {target_position}. No update needed.")
             return False
 
         # 移动棋子到目标位置之前，检查是否有敌方棋子
         target_piece = self.get_piece_at_position(target_position)
         if target_piece and target_piece.get_color() != piece.get_color():
-            # print(f"Battle triggered between {piece.get_name()} and {target_piece.get_name()} at {target_position}")
-
             # 执行战斗
             battle_result = self.battle(piece, target_piece)
+            self.battle_history.append((piece, target_piece, battle_result))  # 记录战斗历史
             if battle_result == 'win_battle':
-                # print(f"{piece.get_name()} wins the battle and moves to {target_position}")
                 target_piece.set_position(None)  # 移除被击败的棋子
             elif battle_result == 'lose_battle':
-                # print(f"{piece.get_name()} loses the battle and stays at {current_position}")
                 piece.set_position(None)  # 移除己方棋子
                 return False  # 不进行位置更新
             else:
-                # print(f"{piece.get_name()} and {target_piece.get_name()} both are removed (draw)")
                 piece.set_position(None)
                 target_piece.set_position(None)
                 return False  # 不进行位置更新
 
         if current_position:
             if piece.get_color() == 'red':
-                self.occupied_positions_red.remove(current_position)
+                if current_position in self.occupied_positions_red:
+                    self.occupied_positions_red.remove(current_position)
                 self.occupied_positions_red.add(target_position)
             else:
-                self.occupied_positions_blue.remove(current_position)
+                if current_position in self.occupied_positions_blue:
+                    self.occupied_positions_blue.remove(current_position)
                 self.occupied_positions_blue.add(target_position)
 
         piece.set_position(target_position)
-        # print(f"Player {player_color}: Updated {piece.get_name()} to {target_position}")
-
         return True
-
     def get_valid_moves(self, piece):
         current_position = piece.get_position()
         valid_moves = set()
@@ -317,8 +493,6 @@ class JunQiEnvGame(gym.Env):
                         queue.append(neighbor)
 
         return list(valid_moves)
-
-
 
     def get_railway_moves(self, current_position, piece):
         valid_moves = []
@@ -388,8 +562,6 @@ class JunQiEnvGame(gym.Env):
                 else:
                     break
                 x += 1
-
-
 
     def get_road_moves(self, current_position, piece):
         valid_moves = []
@@ -703,9 +875,7 @@ class JunQiEnvGame(gym.Env):
             piece = self.red_pieces[index]
         else:
             piece = self.blue_pieces[index]
-        # print(f"Get piece by index: color={player_color}, index={index}, piece={piece.get_name()}, color={piece.get_color()}")
         return piece
-
 
     def is_valid_position(self, position):
         x, y = position
@@ -777,6 +947,7 @@ class JunQiEnvGame(gym.Env):
         print(f"当前玩家: {self.current_player}")
         for piece in self.red_pieces + self.blue_pieces:
             print(f"{piece.get_name()} ({piece.get_color()}): {piece.get_position()}")
+
     def piece_name_to_value(self, piece_name):
         """
         Converts a piece name to its corresponding value.
@@ -838,6 +1009,11 @@ class JunQiEnvGame(gym.Env):
             target_piece.set_position(None)
             return 'draw_battle'
 
+    def get_move_history(self):
+        return self.move_history
+
+    def get_battle_history(self):
+        return self.battle_history
 
     def visualize_full_board(self):
         board_rows, board_cols = 13, 5

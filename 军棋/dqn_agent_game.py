@@ -107,10 +107,11 @@ class PolicyValueNet(nn.Module):
             tensor = tensor[:, :target_channels, :, :]
 
         return tensor
-class MCTS:
+class POMCP:
     def __init__(self, env, num_simulations):
         self.env = env
         self.num_simulations = num_simulations
+        self.inference_model = env.inference_model
 
     def search(self, initial_state, player_color, pi, pi_reg):
         for _ in range(self.num_simulations):
@@ -127,20 +128,21 @@ class MCTS:
             if not valid_actions:
                 break
             action = random.choice(valid_actions)
-            next_state, reward, done, _ = env_copy.step_cpy(action, pi, pi_reg,player_color)  # 解包返回值并正确处理
+            next_state, reward, done, _ = env_copy.step_with_inference(action, pi, pi_reg, player_color)
             if isinstance(env_copy.state, str) and env_copy.state in ['red_wins', 'blue_wins']:
                 break
 
     def _best_actions(self, state, player_color):
         valid_actions = self.env.get_valid_actions(player_color)
-        best_actions = sorted(valid_actions, key=lambda a: self._evaluate_action(state, a,player_color), reverse=True)[:20]
+        best_actions = sorted(valid_actions, key=lambda a: self._evaluate_action(state, a, player_color), reverse=True)[:20]
         return best_actions
 
-    def _evaluate_action(self, state, action,player_color):
+    def _evaluate_action(self, state, action, player_color):
         env_copy = copy.deepcopy(self.env)
         env_copy.set_state(state)
-        next_state, reward, done, _ = env_copy.step_cpy(action, self.env.pi, self.env.pi_reg,player_color)
+        next_state, reward, done, _ = env_copy.step_with_inference(action, self.env.pi, self.env.pi_reg, player_color)
         return reward
+
 class DQNAgent:
     def __init__(self, state_size, action_size, env, seed, gamma=0.99, lr=0.001, buffer_size=50000, batch_size=64, update_every=4, tau=0.001, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995):
         self.state_size = state_size
@@ -155,7 +157,7 @@ class DQNAgent:
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
-        self.mcts = MCTS(env, num_simulations=50)
+        self.pomcp = POMCP(env, num_simulations=50)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.qnetwork_local = DuelingQNetwork(self.state_size, action_size, seed).to(self.device)
@@ -223,7 +225,7 @@ class DQNAgent:
             raise ValueError("No valid actions available.")
 
         # 使用蒙特卡洛树搜索筛选出一系列潜在的良好动作
-        mcts_actions = self.mcts.search(self.env.get_state(), player_color, self.pi, self.pi_reg)
+        mcts_actions = self.pomcp.search(self.env.get_state(), player_color, self.pi, self.pi_reg)
         mcts_valid_actions = [a for a in mcts_actions if a in valid_actions]
 
         # 在蒙特卡洛树搜索筛选出的动作中进行强化学习策略的评估
