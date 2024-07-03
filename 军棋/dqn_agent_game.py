@@ -107,11 +107,16 @@ class PolicyValueNet(nn.Module):
             tensor = tensor[:, :target_channels, :, :]
 
         return tensor
+
 class POMCP:
-    def __init__(self, env, num_simulations):
+    def __init__(self, env,weights,num_simulations):
         self.env = env
         self.num_simulations = num_simulations
         self.inference_model = env.inference_model
+        self.weights = weights
+        
+    def update_weights(self, weights):
+        self.weights = weights
 
     def search(self, initial_state, player_color, pi, pi_reg):
         for _ in range(self.num_simulations):
@@ -128,7 +133,7 @@ class POMCP:
             if not valid_actions:
                 break
             action = random.choice(valid_actions)
-            next_state, reward, done, _ = env_copy.step_with_inference(action, pi, pi_reg, player_color)
+            next_state, reward, done, _ = env_copy.step_with_inference(action, pi, pi_reg, player_color,self.weights)
             if isinstance(env_copy.state, str) and env_copy.state in ['red_wins', 'blue_wins']:
                 break
 
@@ -140,7 +145,7 @@ class POMCP:
     def _evaluate_action(self, state, action, player_color):
         env_copy = copy.deepcopy(self.env)
         env_copy.set_state(state)
-        next_state, reward, done, _ = env_copy.step_with_inference(action, self.env.pi, self.env.pi_reg, player_color)
+        next_state, reward, done, _ = env_copy.step_with_inference(action, self.env.pi, self.env.pi_reg, player_color,self.weights)
         return reward
 
 class DQNAgent:
@@ -157,7 +162,6 @@ class DQNAgent:
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
-        self.pomcp = POMCP(env, num_simulations=50)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.qnetwork_local = DuelingQNetwork(self.state_size, action_size, seed).to(self.device)
@@ -172,6 +176,49 @@ class DQNAgent:
         epsilon = 1e-8
         self.pi = np.full(action_size, (1.0 / action_size) + epsilon)
         self.pi_reg = np.full(action_size, (1.0 / action_size) + epsilon)
+        # 初始权重
+        self.weights = {
+            "base_reward": 1.0,
+            "protection_reward": 0.8,
+            "attack_important_reward": 1.2,
+            "defense_strategy_reward": 1.0,
+            "engineer_mine_reward": 1.0,
+            "movement_distance_reward": 0.5,
+            "bluffing_reward": 0.7,
+            "collaboration_reward": 0.6,
+            "defensive_attack_reward": 0.9
+        }
+        self.pomcp = POMCP(env, self.weights,num_simulations=50)
+        
+    def get_weights(self):
+        return self.weights
+    
+    def adjust_weights(self, game_state):
+        # 获取当前游戏状态的相关信息
+        num_own_pieces = len([p for p in self.env.red_pieces if p.get_position()])
+        num_opponent_pieces = len([p for p in self.env.blue_pieces if p.get_position()])
+        own_flag_position = self.env.get_flag_position('red')
+        opponent_flag_position = self.env.get_flag_position('blue')
+
+        # 根据己方和对方剩余棋子的数量调整权重
+        if num_own_pieces > num_opponent_pieces:
+            self.weights["attack_important_reward"] += 0.1
+            self.weights["protection_reward"] -= 0.1
+        else:
+            self.weights["attack_important_reward"] -= 0.1
+            self.weights["protection_reward"] += 0.1
+
+        # 如果己方军旗位置已知，则增加保护军旗的权重
+        if own_flag_position:
+            self.weights["protection_reward"] += 0.2
+        else:
+            self.weights["protection_reward"] -= 0.2
+
+        # 如果对方军旗位置已知，则增加攻击敌方军旗的权重
+        if opponent_flag_position:
+            self.weights["attack_important_reward"] += 0.2
+        else:
+            self.weights["attack_important_reward"] -= 0.2
 
     def get_prob_matrix(self, state):
         prob_matrix = np.zeros((self.env.board_rows, self.env.board_cols))
@@ -183,7 +230,8 @@ class DQNAgent:
             
     def act(self, state, turn, num_own_pieces, num_opponent_pieces, features, player_color):
         print(f"Current player color in act: {player_color}")
-
+        self.adjust_weights(state)
+        self.pomcp.update_weights(self.weights)
         state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).to(self.device)  # 调整维度
         state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)  # 确保是 (1, 3, board_rows, board_cols)
 
@@ -239,8 +287,6 @@ class DQNAgent:
         print(f"Selected action: {action}")
         return action, self.pi, self.pi_reg
 
-
-
     def step(self, state, action, reward, next_state, done):
         if action >= len(self.pi):
             self.pi = np.pad(self.pi, (0, action - len(self.pi) + 1), 'constant', constant_values=0)
@@ -282,14 +328,13 @@ class DQNAgent:
         q_values = self.qnetwork_local(states).detach().cpu().numpy()
         self.pi = self.replicator_dynamics_update(self.pi, q_values.mean(axis=0))
 
-
     def replicator_dynamics_update(self, pi, q_values, learning_rate=0.01):
         new_pi = pi * np.exp(learning_rate * q_values)
         new_pi /= new_pi.sum()
         return new_pi
 
     def soft_update(self, local_model, target_model, tau):
-        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+        for target_param, local_param in zip(target_model.parameters(), local_param.parameters()):
             target_param.data.copy_(tau * local_param.data + (1.0 - tau) * target_param.data)
 
     def reward_transformation(self, reward, pi, pi_reg, eta):

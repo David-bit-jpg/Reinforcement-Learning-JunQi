@@ -258,7 +258,7 @@ class JunQiEnvGame(gym.Env):
     def set_state(self, state):
         self.state = state
             
-    def step(self, action, pi, pi_reg, current_player_color):
+    def step(self, action, pi, pi_reg, current_player_color, weights):
         player_color, piece, target_position = self.decode_action(action)
         if piece.get_color() != current_player_color:
             logging.warning(f"Invalid action: In turn {self.turn}, it's {current_player_color}'s turn, but the piece is {piece.get_color()} {piece.get_name()}.")
@@ -274,16 +274,16 @@ class JunQiEnvGame(gym.Env):
 
         # 其他逻辑
         next_state = self.get_state()
-        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg, player_color)
+        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg, player_color,weights)
         if current_player_color == 'red' and self.check_winner(current_player_color) == 'red_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color,weights)
         elif current_player_color == 'blue' and self.check_winner(current_player_color) == 'blue_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color,weights)
         done = True  # 每次移动一个棋子后即结束
         info = {"invalid_move": reward < 0}
         return next_state, reward, done, info
 
-    def step_with_inference(self, action, pi, pi_reg, current_player_color):
+    def step_with_inference(self, action, pi, pi_reg, current_player_color,weights):
         player_color, piece, target_position = self.decode_action(action)
         if piece.get_color() != current_player_color:
             logging.warning(f"Invalid action: In turn {self.turn}, it's {current_player_color}'s turn, but the piece is {piece.get_color()} {piece.get_name()}.")
@@ -308,11 +308,11 @@ class JunQiEnvGame(gym.Env):
 
         # 其他逻辑
         next_state = env_copy.get_state()
-        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg, player_color)
+        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg, player_color,weights)
         if current_player_color == 'red' and self.check_winner(current_player_color) == 'red_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color,weights)
         elif current_player_color == 'blue' and self.check_winner(current_player_color) == 'blue_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color,weights)
         done = True  # 每次移动一个棋子后即结束
         info = {"invalid_move": reward < 0}
         return next_state, reward, done, info

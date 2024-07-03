@@ -11,7 +11,7 @@ class RewardModel:
     def reset(self):
         self.total_reward = 0
 
-    def get_reward(self, state, action, outcome, pi_reg, pi, player_color):
+    def get_reward(self, state, action, outcome, pi_reg, pi, player_color, weights):
         piece, target_position = action
         pi = np.array(pi)
         pi_reg = np.array(pi_reg)
@@ -25,34 +25,34 @@ class RewardModel:
         if reg_prob == 0:
             reg_prob = 1e-10
 
-        reward = self._calculate_base_reward(state, action, outcome, player_color)
+        reward = self._calculate_base_reward(state, action, outcome, player_color) * weights["base_reward"]
         reward -= self.eta * np.log(action_prob / reg_prob)
 
-        bluffing_reward = self._calculate_bluffing_reward(action)
+        bluffing_reward = self._calculate_bluffing_reward(action) * weights["bluffing_reward"]
         reward += bluffing_reward
 
-        collaboration_reward = self._calculate_collaboration_reward(piece, target_position)
+        collaboration_reward = self._calculate_collaboration_reward(piece, target_position) * weights["collaboration_reward"]
         reward += collaboration_reward
 
-        attack_flag_reward = self._calculate_attack_flag_reward(piece, target_position)
+        attack_flag_reward = self._calculate_attack_flag_reward(piece, target_position) * weights["attack_important_reward"]
         reward += attack_flag_reward
 
-        protection_reward = self._calculate_protection_reward(piece, target_position)
+        protection_reward = self._calculate_protection_reward(piece, target_position) * weights["protection_reward"]
         reward += protection_reward
 
-        attack_important_reward = self._calculate_attack_important_reward(piece, target_position)
+        attack_important_reward = self._calculate_attack_important_reward(piece, target_position) * weights["attack_important_reward"]
         reward += attack_important_reward
 
-        engineer_mine_reward = self._calculate_engineer_mine_reward(piece, target_position)
+        engineer_mine_reward = self._calculate_engineer_mine_reward(piece, target_position) * weights["engineer_mine_reward"]
         reward += engineer_mine_reward
 
-        movement_distance_reward = self._calculate_movement_distance_reward(piece, target_position)
+        movement_distance_reward = self._calculate_movement_distance_reward(piece, target_position) * weights["movement_distance_reward"]
         reward += movement_distance_reward
 
-        defense_strategy_reward = self._calculate_defense_strategy_reward(piece, target_position, player_color)
+        defense_strategy_reward = self._calculate_defense_strategy_reward(piece, target_position, player_color) * weights["defense_strategy_reward"]
         reward += defense_strategy_reward
 
-        defensive_attack_reward = self._calculate_defensive_attack_reward(piece, target_position)
+        defensive_attack_reward = self._calculate_defensive_attack_reward(piece, target_position) * weights["defensive_attack_reward"]
         reward += defensive_attack_reward
 
         death_penalty = self._calculate_death_penalty(piece, outcome)
@@ -276,10 +276,8 @@ class RewardModel:
                 if opponent_piece.get_name() not in ['地雷', '炸弹']:
                     penalty += 5
         return penalty
+
     def _calculate_attack_flag_reward(self, piece, target_position):
-        """
-        计算进攻敌方军旗的奖励
-        """
         reward = 0
         flag_position = self.env.get_flag_position('blue' if piece.get_color() == 'red' else 'red')
 
