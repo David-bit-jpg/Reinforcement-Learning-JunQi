@@ -28,6 +28,7 @@ piece_encoding = {
     '工兵': 11,
     '军旗': 12,
 }
+
 class InferenceModel:
     def __init__(self, board_rows, board_cols, piece_types):
         self.board_rows = board_rows
@@ -57,6 +58,9 @@ class InferenceModel:
 
         # 确保军旗位置信念更新
         self.update_belief_from_flag_positions()
+
+        # 更新基于地雷推测的信念
+        self.update_belief_from_mine_positions()
 
     def update_belief_from_observations(self, observations):
         for pos, piece_type in observations.items():
@@ -150,6 +154,20 @@ class InferenceModel:
             self.belief[x, y, self.piece_types.index('军旗')] = 1
             self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
 
+    def update_belief_from_mine_positions(self):
+        # 对方两个倒数排第二角可能是地雷
+        corners = [(1, 0), (1, 4)] if self.piece_types.index('red') == 'red' else [(11, 0), (11, 4)]
+        for x, y in corners:
+            self.belief[x, y, self.piece_types.index('地雷')] *= 2.0
+            self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
+
+        # 对方倒数第二排长时间不动的棋子可能是地雷
+        second_last_row = 1 if self.piece_types.index('red') == 'red' else 11
+        for y in range(self.board_cols):
+            if (second_last_row, y) in self.stationary_pieces:
+                self.belief[second_last_row, y, self.piece_types.index('地雷')] *= 1.5
+                self.belief[second_last_row, y, :] /= np.sum(self.belief[second_last_row, y, :])
+
     def infer_opponent_pieces(self):
         inferred_pieces = {}
         for x in range(self.board_rows):
@@ -190,6 +208,7 @@ class InferenceModel:
                 if piece_type == '军旗':
                     return (x, y)
         return None
+
 
 class JunQiEnvGame(gym.Env):
     metadata = {'render.modes': ['human']}
