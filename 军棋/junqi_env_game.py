@@ -30,10 +30,11 @@ piece_encoding = {
 }
 
 class InferenceModel:
-    def __init__(self, board_rows, board_cols, piece_types):
+    def __init__(self, board_rows, board_cols, piece_types, env):
         self.board_rows = board_rows
         self.board_cols = board_cols
         self.piece_types = piece_types
+        self.env = env  # 新增这行
         self.belief = np.ones((board_rows, board_cols, len(piece_types))) / len(piece_types)
         self.move_history = []
         self.battle_history = []
@@ -155,18 +156,23 @@ class InferenceModel:
             self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
 
     def update_belief_from_mine_positions(self):
-        # 对方两个倒数排第二角可能是地雷
-        corners = [(1, 0), (1, 4)] if self.piece_types.index('red') == 'red' else [(11, 0), (11, 4)]
-        for x, y in corners:
-            self.belief[x, y, self.piece_types.index('地雷')] *= 2.0
-            self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
+        if self.env.red_pieces[0].get_color() == 'red':
+            corners = [(1, 0), (1, 4)]
+        else:
+            corners = [(11, 0), (11, 4)]
 
-        # 对方倒数第二排长时间不动的棋子可能是地雷
-        second_last_row = 1 if self.piece_types.index('red') == 'red' else 11
-        for y in range(self.board_cols):
-            if (second_last_row, y) in self.stationary_pieces:
-                self.belief[second_last_row, y, self.piece_types.index('地雷')] *= 1.5
-                self.belief[second_last_row, y, :] /= np.sum(self.belief[second_last_row, y, :])
+        for corner in corners:
+            x, y = corner
+            self.belief[x, y, self.piece_types.index('地雷')] *= 1.5
+            self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
+            
+        for x in range(self.board_rows):
+            for y in range(self.board_cols):
+                piece = self.env.get_piece_at_position((x, y))
+                if piece and piece.get_color() != self.env.red_pieces[0].get_color() and piece.get_position() == (x, y):
+                    if piece in self.stationary_pieces and self.stationary_pieces[piece] > 3:
+                        self.belief[x, y, self.piece_types.index('地雷')] *= 1.5
+                        self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
 
     def infer_opponent_pieces(self):
         inferred_pieces = {}
@@ -229,8 +235,8 @@ class JunQiEnvGame(gym.Env):
         self.pi = None
         self.pi_reg = None
         
-        piece_types = list(piece_encoding.keys())
-        self.inference_model = InferenceModel(self.board_rows, self.board_cols, piece_types)
+        self.piece_types = list(piece_encoding.keys())
+        self.inference_model = InferenceModel(self.board_rows, self.board_cols, self.piece_types, self)  # 传递 env 对象
 
         self.move_history = []
         self.battle_history = []
@@ -251,7 +257,7 @@ class JunQiEnvGame(gym.Env):
                 self.occupied_positions_blue.add(position)
         self.state = 'play'
         self.turn = 0
-        self.inference_model = InferenceModel(self.board_rows, self.board_cols, list(piece_encoding.keys()))
+        self.inference_model = InferenceModel(self.board_rows, self.board_cols, self.piece_types, self)  # 传递 env 对象
         self.move_history = []
         self.battle_history = []
         return self.get_state()
