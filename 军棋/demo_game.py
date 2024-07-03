@@ -93,9 +93,9 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
             # 记录动作
             episode_moves[current_player].append(action)
 
-            # # 每30步可视化棋盘
-            # if t % 60 == 0:
-            #     env.visualize_full_board()
+            # 每30步可视化棋盘
+            if t % 100 == 0:
+                env.visualize_full_board()
 
             # 检查是否有玩家获胜
             winner = env.check_winner(current_player)

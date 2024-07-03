@@ -186,7 +186,8 @@ class DQNAgent:
             "movement_distance_reward": 0.5,
             "bluffing_reward": 0.7,
             "collaboration_reward": 0.6,
-            "defensive_attack_reward": 0.9
+            "defensive_attack_reward": 0.9,
+            "attack_flag_reward": 1.0
         }
         self.pomcp = POMCP(env, self.weights,num_simulations=50)
         
@@ -199,6 +200,10 @@ class DQNAgent:
         num_opponent_pieces = len([p for p in self.env.blue_pieces if p.get_position()])
         own_flag_position = self.env.get_flag_position('red')
         opponent_flag_position = self.env.get_flag_position('blue')
+
+        # 高级棋子数量
+        num_own_high_value_pieces = len([p for p in self.env.red_pieces if p.get_position() and p.get_name() in ['司令', '军长']])
+        num_opponent_high_value_pieces = len([p for p in self.env.blue_pieces if p.get_position() and p.get_name() in ['司令', '军长']])
 
         # 根据己方和对方剩余棋子的数量调整权重
         if num_own_pieces > num_opponent_pieces:
@@ -216,9 +221,50 @@ class DQNAgent:
 
         # 如果对方军旗位置已知，则增加攻击敌方军旗的权重
         if opponent_flag_position:
-            self.weights["attack_important_reward"] += 0.2
+            self.weights["attack_flag_reward"] += 0.2
         else:
-            self.weights["attack_important_reward"] -= 0.2
+            self.weights["attack_flag_reward"] -= 0.2
+
+        # 根据高级棋子的剩余数量调整权重
+        if num_own_high_value_pieces > num_opponent_high_value_pieces:
+            self.weights["defensive_attack_reward"] += 0.1
+        else:
+            self.weights["defensive_attack_reward"] -= 0.1
+
+        # 检查己方高级棋子是否处于危险位置，如果是则增加保护权重
+        for piece in self.env.red_pieces:
+            if piece.get_position() and piece.get_name() in ['司令', '军长']:
+                if not self.env.is_in_camp(piece.get_position()):
+                    self.weights["protection_reward"] += 0.2
+
+        # 增加对关键位置的防御权重，例如铁路和行营
+        for piece in self.env.red_pieces:
+            if piece.get_position() and self.env.is_railway(piece.get_position()):
+                self.weights["defensive_attack_reward"] += 0.1
+            if piece.get_position() and self.env.is_in_camp(piece.get_position()):
+                self.weights["protection_reward"] += 0.1
+
+        # 增加战术欺骗的奖励
+        for piece in self.env.red_pieces:
+            if piece.get_position() and piece.get_name() in ['工兵', '排长']:
+                self.weights["bluffing_reward"] += 0.1
+            if piece.get_position() and piece.get_name() in ['连长', '营长', '团长']:
+                self.weights["bluffing_reward"] += 0.05
+
+        # 检查对方司令是否已经死亡
+        opponent_commander_dead = not any(p.get_name() == '司令' and p.get_color() == 'blue' for p in self.env.blue_pieces if p.get_position())
+        if opponent_commander_dead:
+            self.weights["attack_flag_reward"] += 0.3  # 对方司令死亡后，增加对军旗的攻击权重
+
+        # 确保所有必要的键都存在
+        required_keys = [
+            "base_reward", "protection_reward", "attack_important_reward", "defense_strategy_reward",
+            "engineer_mine_reward", "movement_distance_reward", "bluffing_reward", "collaboration_reward",
+            "defensive_attack_reward", "attack_flag_reward"
+        ]
+        for key in required_keys:
+            if key not in self.weights:
+                self.weights[key] = 1.0  # 或者其他合理的初始值
 
     def get_prob_matrix(self, state):
         prob_matrix = np.zeros((self.env.board_rows, self.env.board_cols))
@@ -326,16 +372,28 @@ class DQNAgent:
         self.soft_update(self.qnetwork_local, self.qnetwork_target, self.tau)
 
         q_values = self.qnetwork_local(states).detach().cpu().numpy()
+        if len(self.pi) != q_values.shape[1]:
+            min_len = min(len(self.pi), q_values.shape[1])
+            self.pi = self.pi[:min_len]
+            q_values = q_values[:, :min_len]
+
         self.pi = self.replicator_dynamics_update(self.pi, q_values.mean(axis=0))
 
+
     def replicator_dynamics_update(self, pi, q_values, learning_rate=0.01):
+        if len(pi) != len(q_values):
+            min_len = min(len(pi), len(q_values))
+            pi = pi[:min_len]
+            q_values = q_values[:min_len]
+        
         new_pi = pi * np.exp(learning_rate * q_values)
         new_pi /= new_pi.sum()
         return new_pi
 
     def soft_update(self, local_model, target_model, tau):
-        for target_param, local_param in zip(target_model.parameters(), local_param.parameters()):
+        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau * local_param.data + (1.0 - tau) * target_param.data)
+
 
     def reward_transformation(self, reward, pi, pi_reg, eta):
         if pi == 0:

@@ -13,10 +13,10 @@ from junqi_env_setup import JunQiEnvSetUp
 MODEL_SAVE_PATH = "/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_model.pth"
 os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
 
-env_setup = JunQiEnvSetUp()
-state_size = env_setup.observation_space.shape[0] * env_setup.observation_space.shape[1] * env_setup.observation_space.shape[2]
-action_size = env_setup.get_action_space_size()
-agent = DQNAgentSetUp(state_size, action_size, env_setup, seed=0)
+env = JunQiEnvSetUp()
+state_size = env.observation_space.shape[0] * env.observation_space.shape[1] * env.observation_space.shape[2]
+action_size = env.get_action_space_size()
+agent = DQNAgentSetUp(state_size, action_size, env, seed=0)
 
 # 加载训练好的模型权重
 agent.qnetwork_local.load_state_dict(torch.load('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/setup_model.pth'))
@@ -44,10 +44,10 @@ def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
             break
 
 # 生成布局
-generate_deployment(env_setup, agent, epsilon=0.2)  # 调整 epsilon 值来控制随机性
+generate_deployment(env, agent, epsilon=0.2)  # 调整 epsilon 值来控制随机性
 
-red_pieces = env_setup.red_pieces
-blue_pieces = env_setup.blue_pieces
+red_pieces = env.red_pieces
+blue_pieces = env.blue_pieces
 
 # 定义训练超参数
 BATCH_SIZE = 64
@@ -63,9 +63,12 @@ env = JunQiEnvGame(initial_board, input_size=13*5*3, hidden_size=128, output_siz
 state_size = env.get_state_size()
 action_size = len(env.red_pieces) * env.board_rows * env.board_cols
 agent = DQNAgent(state_size, action_size, env, seed=0)
+
 def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay):
     scores = []
     eps = epsilon_start
+    red_moves = []
+    blue_moves = []
 
     for episode in range(num_episodes):
         state = env.reset()
@@ -73,13 +76,26 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
         score = 0
         current_player = 'red'
         current_agent = agent_red
+        episode_moves = {'red': [], 'blue': []}
 
         for t in range(max_t):
-            action, pi, pi_reg = current_agent.act(state, env.turn, len(env.red_pieces), len(env.blue_pieces), features=[], player_color=current_player)
-            next_state, reward, done, info = env.step(action, pi, pi_reg, current_player)
+            try:
+                action, pi, pi_reg = current_agent.act(state, env.turn, len(env.red_pieces), len(env.blue_pieces), features=[], player_color=current_player)
+            except ValueError as e:
+                print(e)
+                break
+            
+            next_state, reward, done, info = env.step(action, pi, pi_reg, current_player,current_agent.get_weights())
             current_agent.step(state.flatten(), action, reward, next_state.flatten(), True)  # 每步都认为done是True
             state = next_state.flatten()
             score += reward
+
+            # 记录动作
+            episode_moves[current_player].append(action)
+
+            # 每30步可视化棋盘
+            if t % 100 == 0:
+                env.visualize_full_board()
 
             # 检查是否有玩家获胜
             winner = env.check_winner(current_player)
@@ -99,6 +115,19 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
         eps = max(epsilon_end, epsilon_decay * eps)
         print(f"Episode {episode + 1}/{num_episodes}, Score: {score}, Epsilon: {eps}")
 
+        # 将每个episode的动作保存到总的动作列表中
+        red_moves.append(episode_moves['red'])
+        blue_moves.append(episode_moves['blue'])
+
+    # 保存动作到文件
+    with open('red_moves.txt', 'w') as f:
+        for episode in red_moves:
+            f.write(' '.join(map(str, episode)) + '\n')
+
+    with open('blue_moves.txt', 'w') as f:
+        for episode in blue_moves:
+            f.write(' '.join(map(str, episode)) + '\n')
+
     return agent_red, agent_blue
 
 # 初始化环境和智能体
@@ -110,11 +139,10 @@ agent_red = DQNAgent(state_size, action_size, env, seed=0)
 agent_blue = DQNAgent(state_size, action_size, env, seed=1)
 
 num_episodes = 1000
-max_t = 100
+max_t = 1000
 epsilon_start = 1.0
 epsilon_end = 0.01
 epsilon_decay = 0.995
 trained_agent_red, trained_agent_blue = train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay)
-# 保存模型
 torch.save(trained_agent_red.qnetwork_local.state_dict(), '/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_agent_red.pth')
 torch.save(trained_agent_blue.qnetwork_local.state_dict(), '/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_agent_blue.pth')
