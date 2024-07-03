@@ -275,7 +275,7 @@ class DQNAgent:
         return prob_matrix
             
     def act(self, state, turn, num_own_pieces, num_opponent_pieces, features, player_color):
-        print(f"Current player color in act: {player_color}")
+        # print(f"Current player color in act: {player_color}")
         self.adjust_weights(state)
         self.pomcp.update_weights(self.weights)
         state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).to(self.device)  # 调整维度
@@ -330,7 +330,7 @@ class DQNAgent:
 
         self.pi = policy.cpu().numpy()  # 将策略值保存为 numpy 数组
         self.pi_reg = self.pi.copy()    # 将正则化策略值保存为 numpy 数组
-        print(f"Selected action: {action}")
+        # print(f"Selected action: {action}")
         return action, self.pi, self.pi_reg
 
     def step(self, state, action, reward, next_state, done):

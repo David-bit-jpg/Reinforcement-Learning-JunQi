@@ -8,6 +8,7 @@ from dqn_agent_game import DQNAgent
 from junqi_env_game import JunQiEnvGame
 from dqn_agent_setup import DQNAgent as DQNAgentSetUp
 from junqi_env_setup import JunQiEnvSetUp
+from tqdm import tqdm
 
 # 确保模型保存的目录存在
 MODEL_SAVE_PATH = "/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_model.pth"
@@ -69,6 +70,8 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
     eps = epsilon_start
     red_moves = []
     blue_moves = []
+    red_rewards = []
+    blue_rewards = []
 
     for episode in range(num_episodes):
         state = env.reset()
@@ -77,54 +80,71 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
         current_player = 'red'
         current_agent = agent_red
         episode_moves = {'red': [], 'blue': []}
+        red_episode_reward = 0
+        blue_episode_reward = 0
 
-        for t in range(max_t):
-            try:
-                action, pi, pi_reg = current_agent.act(state, env.turn, len(env.red_pieces), len(env.blue_pieces), features=[], player_color=current_player)
-            except ValueError as e:
-                print(e)
-                break
-            
-            next_state, reward, done, info = env.step(action, pi, pi_reg, current_player,current_agent.get_weights())
-            current_agent.step(state.flatten(), action, reward, next_state.flatten(), True)  # 每步都认为done是True
-            state = next_state.flatten()
-            score += reward
+        with tqdm(total=max_t, desc=f"Episode {episode + 1}/{num_episodes}") as pbar:
+            for t in range(max_t):
+                try:
+                    action, pi, pi_reg = current_agent.act(state, env.turn, len(env.red_pieces), len(env.blue_pieces), features=[], player_color=current_player)
+                except ValueError as e:
+                    print(e)
+                    break
 
-            # 记录动作
-            episode_moves[current_player].append(action)
+                next_state, reward, done, info = env.step(action, pi, pi_reg, current_player, current_agent.get_weights())
+                current_agent.step(state.flatten(), action, reward, next_state.flatten(), True)  # 每步都认为done是True
+                state = next_state.flatten()
+                score += reward
 
-            # 每30步可视化棋盘
-            if t % 100 == 0:
-                env.visualize_full_board()
+                # 记录动作
+                episode_moves[current_player].append(action)
 
-            # 检查是否有玩家获胜
-            winner = env.check_winner(current_player)
-            if winner != 'No':
-                print(f"Episode {episode + 1}: {winner}")
-                break
+                # 记录奖励
+                if current_player == 'red':
+                    red_episode_reward += reward
+                else:
+                    blue_episode_reward += reward
 
-            # 切换玩家和代理
-            if current_player == 'red':
-                current_player = 'blue'
-                current_agent = agent_blue
-            else:
-                current_player = 'red'
-                current_agent = agent_red
+                # 更新进度条描述
+                pbar.set_postfix({'Red Reward': red_episode_reward, 'Blue Reward': blue_episode_reward, 'Epsilon': eps})
+                pbar.update(1)
+
+                # 每100步可视化棋盘
+                if t % 100 == 0:
+                    env.visualize_full_board()
+
+                # 检查是否有玩家获胜
+                winner = env.check_winner(current_player)
+                if winner != 'No':
+                    print(f"Episode {episode + 1}: {winner}")
+                    break
+
+                # 切换玩家和代理
+                if current_player == 'red':
+                    current_player = 'blue'
+                    current_agent = agent_blue
+                else:
+                    current_player = 'red'
+                    current_agent = agent_red
 
         scores.append(score)
         eps = max(epsilon_end, epsilon_decay * eps)
-        print(f"Episode {episode + 1}/{num_episodes}, Score: {score}, Epsilon: {eps}")
-
+        red_rewards.append(red_episode_reward)
+        blue_rewards.append(blue_episode_reward)
+        
+        # 打印进度和奖励
+        print(f"Episode {episode + 1}/{num_episodes}, Red Reward: {red_episode_reward:.2f}, Blue Reward: {blue_episode_reward:.2f}, Epsilon: {eps:.2f}")
+        
         # 将每个episode的动作保存到总的动作列表中
         red_moves.append(episode_moves['red'])
         blue_moves.append(episode_moves['blue'])
 
     # 保存动作到文件
-    with open('red_moves.txt', 'w') as f:
+    with open('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/red_moves.txt', 'w') as f:
         for episode in red_moves:
             f.write(' '.join(map(str, episode)) + '\n')
 
-    with open('blue_moves.txt', 'w') as f:
+    with open('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/blue_moves.txt', 'w') as f:
         for episode in blue_moves:
             f.write(' '.join(map(str, episode)) + '\n')
 
