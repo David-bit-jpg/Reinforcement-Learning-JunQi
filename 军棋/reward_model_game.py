@@ -7,9 +7,13 @@ class RewardModel:
         self.blue_pieces = blue_pieces
         self.env = env
         self.reset()
+        self.engineer_death_count = 0
+        self.bomb_minor_piece_death_count = 0
 
     def reset(self):
         self.total_reward = 0
+        self.engineer_death_count = 0
+        self.bomb_minor_piece_death_count = 0
 
     def get_reward(self, state, action, outcome, pi_reg, pi, player_color, weights):
         piece, target_position = action
@@ -23,21 +27,28 @@ class RewardModel:
         action_prob = max(action_prob, 1e-10)
         reg_prob = max(reg_prob, 1e-10)
 
-        reward = self._calculate_base_reward(state, action, outcome, player_color) * weights["base_reward"]
-        reward -= self.eta * np.log(action_prob / reg_prob)
+        reward = 0
+        if self._is_special_move(piece, target_position, outcome):
+            reward += self._calculate_special_move_rewards(piece, target_position, outcome, player_color, weights)
+            reward -= self.eta * np.log(action_prob / reg_prob)
 
-        reward += self._calculate_additional_rewards(piece, target_position, weights)
-
-        # 添加更多的惩罚机制
         reward -= self._calculate_additional_penalties(piece, target_position, outcome)
 
         self.total_reward += reward
         return reward
 
-    def _calculate_additional_rewards(self, piece, target_position, weights):
+    def _is_special_move(self, piece, target_position, outcome):
+        # 判断是否为特殊动作
+        if piece.get_name() in ['工兵', '司令', '军长', '师长']:
+            return True
+        if outcome == 'win_game':
+            return True
+        if target_position in self.env.get_camps():
+            return True
+        return False
+
+    def _calculate_special_move_rewards(self, piece, target_position, outcome, player_color, weights):
         rewards = {
-            "bluffing_reward": self._calculate_bluffing_reward(piece, target_position),
-            "collaboration_reward": self._calculate_collaboration_reward(piece, target_position),
             "attack_flag_reward": self._calculate_attack_flag_reward(piece, target_position),
             "protection_reward": self._calculate_protection_reward(piece, target_position),
             "attack_important_reward": self._calculate_attack_important_reward(piece, target_position),
@@ -46,9 +57,19 @@ class RewardModel:
             "defense_strategy_reward": self._calculate_defense_strategy_reward(piece, target_position, weights),
             "defensive_attack_reward": self._calculate_defensive_attack_reward(piece, target_position)
         }
-
         total_reward = sum(rewards[key] * weights[key] for key in rewards)
         return total_reward
+
+    def _calculate_additional_penalties(self, piece, target_position, outcome):
+        penalties = {
+            "death_penalty": self._calculate_death_penalty(piece, outcome),
+            "camp_penalty": self._calculate_camp_penalty(piece, target_position),
+            "engineer_misfire_penalty": self._calculate_engineer_misfire_penalty(piece, target_position),
+            "invalid_move_penalty": self._calculate_invalid_move_penalty(piece, target_position),
+            "dangerous_position_penalty": self._calculate_dangerous_position_penalty(piece, target_position)
+        }
+        total_penalty = sum(penalties[key] for key in penalties)
+        return total_penalty
 
     def _calculate_base_reward(self, state, action, outcome, player_color):
         piece, target_position = action
@@ -63,7 +84,7 @@ class RewardModel:
         reward += flag_protection_value
 
         if outcome == 'win_game':
-            reward += 1000
+            reward += 100
 
         return reward
 
@@ -82,15 +103,15 @@ class RewardModel:
         highway_positions = self.env.define_highways()
 
         if position in railway_positions:
-            return 5
-        elif position in camp_positions:
-            return 4
-        elif position in base_positions:
-            return 3
-        elif position in highway_positions:
             return 2
-        else:
+        elif position in camp_positions:
+            return 1.5
+        elif position in base_positions:
+            return 1.2
+        elif position in highway_positions:
             return 1
+        else:
+            return 0.5
 
     def get_neighboring_value(self, piece, position, player_color):
         neighbors = self.get_neighbors(position, player_color)
@@ -101,10 +122,10 @@ class RewardModel:
             if neighbor_piece:
                 if neighbor_piece.get_color() == piece.get_color():
                     if self.get_piece_value(neighbor_piece) > self.get_piece_value(piece):
-                        value += self.get_piece_value(neighbor_piece) * 0.1
+                        value += self.get_piece_value(neighbor_piece) * 0.05
                 else:
                     if self.get_piece_value(neighbor_piece) > self.get_piece_value(piece):
-                        value -= self.get_piece_value(neighbor_piece) * 0.1
+                        value -= self.get_piece_value(neighbor_piece) * 0.05
 
         return value
 
@@ -117,7 +138,7 @@ class RewardModel:
             return 0
 
         distance = self.get_manhattan_distance(position, flag_position)
-        return 15 / max(distance, 1)
+        return 7 / max(distance, 1)
 
     def get_manhattan_distance(self, pos1, pos2):
         return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
@@ -135,7 +156,7 @@ class RewardModel:
         reward = 0
         if piece.get_name() in ['司令', '军长', '师长']:
             if self.env.is_in_base(target_position):
-                reward += 10
+                reward += 5
         return reward
 
     def _calculate_attack_important_reward(self, piece, target_position):
@@ -143,7 +164,7 @@ class RewardModel:
         opponent_piece = self.env.get_piece_at_position(target_position)
         if opponent_piece and opponent_piece.get_color() != piece.get_color():
             if opponent_piece.get_name() in ['司令', '军长', '师长']:
-                reward += 20
+                reward += 10
         return reward
 
     def _calculate_engineer_mine_reward(self, piece, target_position):
@@ -206,9 +227,9 @@ class RewardModel:
                 if self.get_piece_value(neighbor_piece) < piece_value:
                     valid_moves = self.env.get_valid_moves(neighbor_piece)
                     if target_position in valid_moves:
-                        reward += piece_value * 0.2
+                        reward += piece_value * 0.1
                 if piece_value >= 6 and neighbor_piece.get_name() == '炸弹':
-                    reward += 10
+                    reward += 5
         return reward
 
     def _calculate_defensive_attack_reward(self, piece, target_position):
@@ -222,13 +243,34 @@ class RewardModel:
     def _calculate_death_penalty(self, piece, outcome):
         penalty = 0
         if outcome == 'lose_battle':
-            penalty += self.get_piece_value(piece) * 10
+            penalty += self.get_piece_value(piece) * 20
+            if piece.get_name() == '工兵':
+                self.engineer_death_count += 1
+                penalty += 10 * self.engineer_death_count
+            elif piece.get_name() in ['司令', '军长', '师长']:
+                penalty += 50
+        return penalty
+
+    def _calculate_bomb_minor_piece_penalty(self, piece):
+        penalty = 0
+        if piece.get_name() in ['旅长', '团长', '营长', '连长', '排长', '工兵']:
+            self.bomb_minor_piece_death_count += 1
+            penalty += 10 * self.bomb_minor_piece_death_count
         return penalty
 
     def _calculate_camp_penalty(self, piece, target_position):
         penalty = 0
-        if self.env.is_in_camp(target_position) and not self.env.get_piece_at_position(target_position):
-            penalty += self.get_camp_penalty(target_position, piece.get_color())
+        if piece.get_color() == 'red':
+            enemy_color = 'blue'
+        else:
+            enemy_color = 'red'
+
+        if self.env.is_in_camp(target_position):
+            occupant = self.env.get_piece_at_position(target_position)
+            if occupant and occupant.get_color() == enemy_color:
+                flag_position = self.env.get_flag_position(piece.get_color())
+                distance_to_flag = self.get_manhattan_distance(target_position, flag_position)
+                penalty += (12 - distance_to_flag) * 3  # 距离越近，惩罚越严重
         return penalty
 
     def _calculate_bluffing_reward(self, piece, target_position):
@@ -271,18 +313,6 @@ class RewardModel:
                 reward += 5 / max(distance, 1)  # 鼓励靠近推测的敌方军旗
 
         return reward
-
-
-    def _calculate_additional_penalties(self, piece, target_position, outcome):
-        penalties = {
-            "death_penalty": self._calculate_death_penalty(piece, outcome),
-            "camp_penalty": self._calculate_camp_penalty(piece, target_position),
-            "engineer_misfire_penalty": self._calculate_engineer_misfire_penalty(piece, target_position),
-            "invalid_move_penalty": self._calculate_invalid_move_penalty(piece, target_position)
-        }
-        total_penalty = sum(penalties[key] for key in penalties)
-        return total_penalty
-
 
     def _calculate_dangerous_position_penalty(self, piece, target_position):
         penalty = 0
