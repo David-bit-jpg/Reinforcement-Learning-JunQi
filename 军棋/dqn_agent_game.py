@@ -128,14 +128,21 @@ class POMCP:
         env_copy = copy.deepcopy(self.env)
         env_copy.set_state(state)
 
-        for _ in range(100):  # 限制每次模拟的深度
+        max_simulation_depth = 30 # 初始模拟深度
+        if len(env_copy.red_pieces) + len(env_copy.blue_pieces) < 20:
+            max_simulation_depth = 40  # 棋子较少时增加模拟深度
+        elif len(env_copy.red_pieces) + len(env_copy.blue_pieces) < 10:
+            max_simulation_depth = 50  # 棋子更少时进一步增加模拟深度
+
+        for _ in range(max_simulation_depth):  # 使用动态调整后的模拟深度
             valid_actions = env_copy.get_valid_actions(player_color)
             if not valid_actions:
                 break
             action = random.choice(valid_actions)
-            next_state, reward, done, _ = env_copy.step_with_inference(action, pi, pi_reg, player_color,self.weights)
+            next_state, reward, done, _ = env_copy.step_with_inference(action, pi, pi_reg, player_color, self.weights)
             if isinstance(env_copy.state, str) and env_copy.state in ['red_wins', 'blue_wins']:
                 break
+
 
     def _best_actions(self, state, player_color):
         valid_actions = self.env.get_valid_actions(player_color)
