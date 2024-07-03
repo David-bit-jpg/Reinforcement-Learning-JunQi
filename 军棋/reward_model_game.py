@@ -28,6 +28,9 @@ class RewardModel:
 
         reward += self._calculate_additional_rewards(piece, target_position, weights)
 
+        # 添加更多的惩罚机制
+        reward -= self._calculate_additional_penalties(piece, target_position, outcome)
+
         self.total_reward += reward
         return reward
 
@@ -268,3 +271,32 @@ class RewardModel:
                 reward += 5 / max(distance, 1)  # 鼓励靠近推测的敌方军旗
 
         return reward
+
+
+    def _calculate_additional_penalties(self, piece, target_position, outcome):
+        penalties = {
+            "death_penalty": self._calculate_death_penalty(piece, outcome),
+            "camp_penalty": self._calculate_camp_penalty(piece, target_position),
+            "engineer_misfire_penalty": self._calculate_engineer_misfire_penalty(piece, target_position),
+            "invalid_move_penalty": self._calculate_invalid_move_penalty(piece, target_position)
+        }
+        total_penalty = sum(penalties[key] for key in penalties)
+        return total_penalty
+
+
+    def _calculate_dangerous_position_penalty(self, piece, target_position):
+        penalty = 0
+        if not self.env.is_in_camp(target_position):
+            neighbors = self.get_neighbors(target_position, 'red' if piece.get_color() == 'blue' else 'blue')
+            for neighbor_pos in neighbors:
+                neighbor_piece = self.env.get_piece_at_position(neighbor_pos)
+                if neighbor_piece and neighbor_piece.get_color() != piece.get_color():
+                    penalty += 5
+        return penalty
+    
+    def _calculate_invalid_move_penalty(self, piece, target_position):
+        # 检查是否为有效移动
+        valid_moves = self.env.get_valid_moves(piece)
+        if target_position not in valid_moves:
+            return 10  # 给予惩罚分数
+        return 0
