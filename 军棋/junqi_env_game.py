@@ -37,6 +37,7 @@ class InferenceModel:
         self.move_history = []
         self.battle_history = []
         self.stationary_pieces = {}  # 记录长时间不动的棋子
+        self.flag_positions = {}  # 记录已揭露的军旗位置
 
     def update_belief(self, observations, move_history, battle_history):
         self.move_history.extend(move_history)
@@ -53,6 +54,9 @@ class InferenceModel:
 
         # 更新基于站位的信念
         self.update_belief_from_stationary_pieces()
+
+        # 确保军旗位置信念更新
+        self.update_belief_from_flag_positions()
 
     def update_belief_from_observations(self, observations):
         for pos, piece_type in observations.items():
@@ -122,6 +126,11 @@ class InferenceModel:
                 else:
                     self.stationary_pieces[(defender_x, defender_y)] = {'wins': 1, 'moves': 0}
 
+            # 如果防守者是司令并且被打败
+            if defender.get_name() == '司令' and result == 'win':
+                flag_position = self.get_flag_position(defender.get_color())
+                if flag_position:
+                    self.flag_positions[defender.get_color()] = flag_position
 
     def update_belief_from_stationary_pieces(self):
         for pos, data in self.stationary_pieces.items():
@@ -133,6 +142,13 @@ class InferenceModel:
                 for piece in high_value_pieces:
                     self.belief[pos[0], pos[1], self.piece_types.index(piece)] *= 1.2
                 self.belief[pos[0], pos[1], :] /= np.sum(self.belief[pos[0], pos[1], :])
+
+    def update_belief_from_flag_positions(self):
+        for color, position in self.flag_positions.items():
+            x, y = position
+            self.belief[x, y, :] = 0
+            self.belief[x, y, self.piece_types.index('军旗')] = 1
+            self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
 
     def infer_opponent_pieces(self):
         inferred_pieces = {}
@@ -159,6 +175,21 @@ class InferenceModel:
     def is_valid_position(self, position):
         x, y = position
         return 0 <= x < self.board_rows and 0 <= y < self.board_cols
+
+    def get_flag_position(self, color):
+        return self.env.get_flag_position(color)
+        
+    def get_inferred_flag_position(self, color):
+        """
+        返回推测的军旗位置
+        """
+        for x in range(self.board_rows):
+            for y in range(self.board_cols):
+                piece_type_index = np.argmax(self.belief[x, y, :])
+                piece_type = self.piece_types[piece_type_index]
+                if piece_type == '军旗':
+                    return (x, y)
+        return None
 
 class JunQiEnvGame(gym.Env):
     metadata = {'render.modes': ['human']}
