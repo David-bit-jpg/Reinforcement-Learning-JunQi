@@ -28,47 +28,55 @@ piece_encoding = {
     '工兵': 11,
     '军旗': 12,
 }
+import numpy as np
 
 class InferenceModel:
     def __init__(self, board_rows, board_cols, piece_types, env):
         self.board_rows = board_rows
         self.board_cols = board_cols
         self.piece_types = piece_types
-        self.env = env  # 新增这行
+        self.env = env
         self.belief = np.ones((board_rows, board_cols, len(piece_types))) / len(piece_types)
         self.move_history = []
         self.battle_history = []
-        self.stationary_pieces = {}  # 记录长时间不动的棋子
-        self.flag_positions = {}  # 记录已揭露的军旗位置
+        self.stationary_pieces = {}
+        self.flag_positions = {}
 
-    def update_belief(self, observations, move_history, battle_history):
+    def update_belief(self, move_history, battle_history):
         self.move_history.extend(move_history)
         self.battle_history.extend(battle_history)
 
-        # 更新基于观察的信念
-        self.update_belief_from_observations(observations)
-        
-        # 更新基于走路历史的信念
         self.update_belief_from_move_history()
-
-        # 更新基于战斗历史的信念
         self.update_belief_from_battle_history()
-
-        # 更新基于站位的信念
         self.update_belief_from_stationary_pieces()
-
-        # 确保军旗位置信念更新
         self.update_belief_from_flag_positions()
-
-        # 更新基于地雷推测的信念
         self.update_belief_from_mine_positions()
 
-    def update_belief_from_observations(self, observations):
-        for pos, piece_type in observations.items():
-            x, y = pos
-            self.belief[x, y, :] = 0
-            self.belief[x, y, self.piece_types.index(piece_type)] = 1
-            self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
+    def apply_initial_guess(self):
+        opponent_color = 'blue' if self.env.red_pieces[0].get_color() == 'red' else 'red'
+        opponent_base_line = 0 if opponent_color == 'blue' else 12
+        opponent_second_base_line = 1 if opponent_color == 'blue' else 11
+
+        for piece in self.env.get_pieces(opponent_color):
+            x, y = piece.get_position()
+            if x is not None and y is not None:
+                if x == opponent_base_line:
+                    if y in [1, 3]:
+                        self.belief[x, y, self.piece_types.index('军旗')] = 0.5
+                    self.belief[x, y, self.piece_types.index('地雷')] = 0.3
+                    self.belief[x, y, self.piece_types.index('司令')] = 0.1
+                    self.belief[x, y, self.piece_types.index('军长')] = 0.1
+                elif x == opponent_second_base_line:
+                    self.belief[x, y, self.piece_types.index('地雷')] = 0.3
+                elif self.env.is_railway((x, y)):
+                    self.belief[x, y, self.piece_types.index('工兵')] = 0.5
+                else:
+                    self.belief[x, y, self.piece_types.index('炸弹')] = 0.2
+                    self.belief[x, y, self.piece_types.index('师长')] = 0.2
+                    self.belief[x, y, self.piece_types.index('旅长')] = 0.2
+                    self.belief[x, y, self.piece_types.index('团长')] = 0.2
+
+                self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
 
     def update_belief_from_move_history(self):
         for move in self.move_history:
@@ -77,12 +85,11 @@ class InferenceModel:
             piece_type = piece.get_name()
 
             if piece_type == '工兵':
-                self.belief[x, y, :] *= 1.5  # 提高工兵位置的概率
+                self.belief[x, y, :] *= 1.5
             else:
-                self.belief[x, y, :] *= 1.1  # 其他棋子的位置稍微提高概率
+                self.belief[x, y, :] *= 1.1
             self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
 
-            # 检查大棋子附近的位置
             if piece_type in ['司令', '军长']:
                 for nx, ny in self.get_neighboring_positions(end_pos):
                     if self.is_valid_position((nx, ny)):
@@ -92,46 +99,28 @@ class InferenceModel:
     def update_belief_from_battle_history(self):
         for battle in self.battle_history:
             attacker, defender, result = battle
-            
-            # 检查攻击者和防守者是否都还在棋盘上
-            if attacker.get_position() is not None:
-                attacker_x, attacker_y = attacker.get_position()
-            else:
-                attacker_x, attacker_y = None, None
-            
-            if defender.get_position() is not None:
-                defender_x, defender_y = defender.get_position()
-            else:
-                defender_x, defender_y = None, None
+            attacker_pos = attacker.get_position()
+            defender_pos = defender.get_position()
 
             if result == 'win':
-                if attacker_x is not None and attacker_y is not None:
-                    self.belief[attacker_x, attacker_y, :] *= 1.2  # 增加攻击者位置上高价值棋子的概率
-                    self.belief[attacker_x, attacker_y, :] /= np.sum(self.belief[attacker_x, attacker_y, :])
-                if defender_x is not None and defender_y is not None:
-                    self.belief[defender_x, defender_y, :] *= 0.8  # 减少被击败者位置上高价值棋子的概率
-                    self.belief[defender_x, defender_y, :] /= np.sum(self.belief[defender_x, defender_y, :])
+                if attacker_pos:
+                    x, y = attacker_pos
+                    self.belief[x, y, :] *= 1.2
+                    self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
+                if defender_pos:
+                    x, y = defender_pos
+                    self.belief[x, y, :] *= 0.8
+                    self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
             elif result == 'lose':
-                if attacker_x is not None and attacker_y is not None:
-                    self.belief[attacker_x, attacker_y, :] *= 0.8  # 减少攻击者位置上高价值棋子的概率
-                    self.belief[attacker_x, attacker_y, :] /= np.sum(self.belief[attacker_x, attacker_y, :])
-                if defender_x is not None and defender_y is not None:
-                    self.belief[defender_x, defender_y, :] *= 1.2  # 增加防守者位置上高价值棋子的概率
-                    self.belief[defender_x, defender_y, :] /= np.sum(self.belief[defender_x, defender_y, :])
+                if attacker_pos:
+                    x, y = attacker_pos
+                    self.belief[x, y, :] *= 0.8
+                    self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
+                if defender_pos:
+                    x, y = defender_pos
+                    self.belief[x, y, :] *= 1.2
+                    self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
 
-            # 更新站位信息
-            if result == 'win' and attacker_x is not None and attacker_y is not None:
-                if (attacker_x, attacker_y) in self.stationary_pieces:
-                    self.stationary_pieces[(attacker_x, attacker_y)]['wins'] += 1
-                else:
-                    self.stationary_pieces[(attacker_x, attacker_y)] = {'wins': 1, 'moves': 0}
-            elif result == 'lose' and defender_x is not None and defender_y is not None:
-                if (defender_x, defender_y) in self.stationary_pieces:
-                    self.stationary_pieces[(defender_x, defender_y)]['wins'] += 1
-                else:
-                    self.stationary_pieces[(defender_x, defender_y)] = {'wins': 1, 'moves': 0}
-
-            # 如果防守者是司令并且被打败
             if defender.get_name() == '司令' and result == 'win':
                 flag_position = self.get_flag_position(defender.get_color())
                 if flag_position:
@@ -140,7 +129,7 @@ class InferenceModel:
     def update_belief_from_stationary_pieces(self):
         for pos, data in self.stationary_pieces.items():
             if data['moves'] == 0 and data['wins'] == 0:
-                self.belief[pos[0], pos[1], self.piece_types.index('炸弹')] *= 1.5
+                self.belief[pos[0], pos[1], self.piece_types.index('地雷')] *= 1.5
                 self.belief[pos[0], pos[1], :] /= np.sum(self.belief[pos[0], pos[1], :])
             elif data['wins'] > 2:
                 high_value_pieces = ['司令', '军长', '师长']
@@ -156,31 +145,29 @@ class InferenceModel:
             self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
 
     def update_belief_from_mine_positions(self):
-        if self.env.red_pieces[0].get_color() == 'red':
-            corners = [(1, 0), (1, 4)]
-        else:
-            corners = [(11, 0), (11, 4)]
+        opponent_color = 'blue' if self.env.red_pieces[0].get_color() == 'red' else 'red'
+        opponent_second_base_line = 1 if opponent_color == 'blue' else 11
 
-        for corner in corners:
-            x, y = corner
-            self.belief[x, y, self.piece_types.index('地雷')] *= 1.5
-            self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
-            
         for x in range(self.board_rows):
             for y in range(self.board_cols):
                 piece = self.env.get_piece_at_position((x, y))
-                if piece and piece.get_color() != self.env.red_pieces[0].get_color() and piece.get_position() == (x, y):
-                    if piece in self.stationary_pieces and self.stationary_pieces[piece] > 3:
+                if piece and piece.get_color() == opponent_color and piece.get_position() == (x, y):
+                    if x in [0, opponent_second_base_line]:
                         self.belief[x, y, self.piece_types.index('地雷')] *= 1.5
-                        self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
+                    elif piece in self.stationary_pieces and self.stationary_pieces[piece] > 3:
+                        self.belief[x, y, self.piece_types.index('地雷')] *= 1.5
+                    self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
 
     def infer_opponent_pieces(self):
         inferred_pieces = {}
+        opponent_color = 'blue' if self.env.red_pieces[0].get_color() == 'red' else 'red'
         for x in range(self.board_rows):
             for y in range(self.board_cols):
-                piece_type_index = np.argmax(self.belief[x, y, :])
-                piece_type = self.piece_types[piece_type_index]
-                inferred_pieces[(x, y)] = piece_type
+                piece = self.env.get_piece_at_position((x, y))
+                if piece and piece.get_color() == opponent_color:
+                    piece_type_index = np.argmax(self.belief[x, y, :])
+                    piece_type = self.piece_types[piece_type_index]
+                    inferred_pieces[(x, y)] = piece_type
         return inferred_pieces
 
     def get_neighboring_positions(self, position):
@@ -202,19 +189,6 @@ class InferenceModel:
 
     def get_flag_position(self, color):
         return self.env.get_flag_position(color)
-        
-    def get_inferred_flag_position(self, color):
-        """
-        返回推测的军旗位置
-        """
-        for x in range(self.board_rows):
-            for y in range(self.board_cols):
-                piece_type_index = np.argmax(self.belief[x, y, :])
-                piece_type = self.piece_types[piece_type_index]
-                if piece_type == '军旗':
-                    return (x, y)
-        return None
-
 
 class JunQiEnvGame(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -295,7 +269,7 @@ class JunQiEnvGame(gym.Env):
         observations = self.get_observation()
         move_history = self.get_move_history()
         battle_history = self.get_battle_history()
-        self.inference_model.update_belief(observations, move_history, battle_history)
+        self.inference_model.update_belief(move_history, battle_history)
 
         # 其他逻辑
         next_state = self.get_state()
@@ -1070,8 +1044,9 @@ class JunQiEnvGame(gym.Env):
 
     def get_battle_history(self):
         return self.battle_history
-
-    def visualize_full_board(self):
+    
+    
+    def visualize_full_board(self, last_move=None, battle_info=None):
         board_rows, board_cols = 13, 5
         fig, ax = plt.subplots(figsize=(8, 12))
         ax.set_xticks(np.arange(board_cols + 1) - 0.5, minor=True)
@@ -1094,5 +1069,93 @@ class JunQiEnvGame(gym.Env):
             if pos is not None:
                 y, x = pos
                 ax.text(x, y, piece.get_name(), ha='center', va='center', fontsize=12, color='blue', bbox=dict(facecolor='white', edgecolor='blue', boxstyle='round,pad=0.3'), fontproperties=font_prop)
+
+        if last_move:
+            piece, start_pos, end_pos = last_move
+            sy, sx = start_pos
+            ey, ex = end_pos
+            ax.arrow(sx, sy, ex - sx, ey - sy, head_width=0.3, head_length=0.3, fc='green', ec='green')
+
+        if battle_info:
+            attacker, defender, result = battle_info
+            if result == 'win':
+                attacker_pos = attacker.get_position()
+                defender_pos = defender.get_position()
+                if attacker_pos and defender_pos:
+                    ay, ax_pos = attacker_pos
+                    dy, dx = defender_pos
+                    ax.plot([ax_pos, dx], [ay, dy], 'r-', linewidth=2)
+                    ax.text(dx, dy, f"{defender.get_name()} defeated by {attacker.get_name()}", ha='center', va='center', fontsize=10, color='black', bbox=dict(facecolor='yellow', edgecolor='red', boxstyle='round,pad=0.3'), fontproperties=font_prop)
+            elif result == 'lose':
+                attacker_pos = attacker.get_position()
+                defender_pos = defender.get_position()
+                if attacker_pos and defender_pos:
+                    ay, ax_pos = attacker_pos
+                    dy, dx = defender_pos
+                    ax.plot([ax_pos, dx], [ay, dy], 'r-', linewidth=2)
+                    ax.text(ax_pos, ay, f"{attacker.get_name()} defeated by {defender.get_name()}", ha='center', va='center', fontsize=10, color='black', bbox=dict(facecolor='yellow', edgecolor='blue', boxstyle='round,pad=0.3'), fontproperties=font_prop)
+            elif result == 'draw':
+                attacker_pos = attacker.get_position()
+                defender_pos = defender.get_position()
+                if attacker_pos and defender_pos:
+                    ay, ax_pos = attacker_pos
+                    dy, dx = defender_pos
+                    ax.plot([ax_pos, dx], [ay, dy], 'r-', linewidth=2)
+                    ax.text((ax_pos + dx) / 2, (ay + dy) / 2, "Draw", ha='center', va='center', fontsize=10, color='black', bbox=dict(facecolor='yellow', edgecolor='purple', boxstyle='round,pad=0.3'), fontproperties=font_prop)
+
+        plt.show()
+        
+    def visualize_inferred_board(self, player_color):
+        inferred_pieces = self.inference_model.infer_opponent_pieces()
+        board_rows, board_cols = 13, 5
+        
+        # 创建一个大的图形，包含两个子图
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 12))
+        
+        # 设置子图1：实际棋盘布局
+        ax1.set_xticks(np.arange(board_cols + 1) - 0.5, minor=True)
+        ax1.set_yticks(np.arange(board_rows + 1) - 0.5, minor=True)
+        ax1.grid(which="minor", color="black", linestyle='-', linewidth=2)
+        ax1.tick_params(which="minor", size=0)
+        ax1.set_xlim(-0.5, board_cols - 0.5)
+        ax1.set_ylim(-0.5, board_rows - 0.5)
+        ax1.invert_yaxis()
+        ax1.set_title("Actual Full Board Deployment", fontproperties=font_prop)
+
+        # 显示实际棋盘布局
+        for piece in self.red_pieces:
+            pos = piece.get_position()
+            if pos is not None:
+                y, x = pos
+                ax1.text(x, y, piece.get_name(), ha='center', va='center', fontsize=12, color='red', bbox=dict(facecolor='white', edgecolor='red', boxstyle='round,pad=0.3'), fontproperties=font_prop)
+
+        for piece in self.blue_pieces:
+            pos = piece.get_position()
+            if pos is not None:
+                y, x = pos
+                ax1.text(x, y, piece.get_name(), ha='center', va='center', fontsize=12, color='blue', bbox=dict(facecolor='white', edgecolor='blue', boxstyle='round,pad=0.3'), fontproperties=font_prop)
+
+        # 设置子图2：推理后的棋盘布局
+        ax2.set_xticks(np.arange(board_cols + 1) - 0.5, minor=True)
+        ax2.set_yticks(np.arange(board_rows + 1) - 0.5, minor=True)
+        ax2.grid(which="minor", color="black", linestyle='-', linewidth=2)
+        ax2.tick_params(which="minor", size=0)
+        ax2.set_xlim(-0.5, board_cols - 0.5)
+        ax2.set_ylim(-0.5, board_rows - 0.5)
+        ax2.invert_yaxis()
+        ax2.set_title(f"Inferred Board Deployment by {player_color}", fontproperties=font_prop)
+
+        # 显示推理出的对方棋子
+        for (pos, piece_type) in inferred_pieces.items():
+            x, y = pos
+            ax2.text(y, x, piece_type, ha='center', va='center', fontsize=12, color='grey', bbox=dict(facecolor='white', edgecolor='grey', boxstyle='round,pad=0.3'), fontproperties=font_prop)
+        
+        # 显示自己的棋子
+        for piece in self.red_pieces if player_color == 'red' else self.blue_pieces:
+            pos = piece.get_position()
+            if pos is not None:
+                y, x = pos
+                color = 'red' if player_color == 'red' else 'blue'
+                ax2.text(x, y, piece.get_name(), ha='center', va='center', fontsize=12, color=color, bbox=dict(facecolor='white', edgecolor=color, boxstyle='round,pad=0.3'), fontproperties=font_prop)
 
         plt.show()

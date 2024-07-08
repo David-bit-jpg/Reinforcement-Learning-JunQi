@@ -64,7 +64,6 @@ env = JunQiEnvGame(initial_board, input_size=13*5*3, hidden_size=128, output_siz
 state_size = env.get_state_size()
 action_size = len(env.red_pieces) * env.board_rows * env.board_cols
 agent = DQNAgent(state_size, action_size, env, seed=0)
-
 def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay):
     scores = []
     eps = epsilon_start
@@ -82,6 +81,8 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
         episode_moves = {'red': [], 'blue': []}
         red_episode_reward = 0
         blue_episode_reward = 0
+        last_move = None
+        battle_info = None
 
         with tqdm(total=max_t, desc=f"Episode {episode + 1}/{num_episodes}") as pbar:
             for t in range(max_t):
@@ -109,9 +110,16 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
                 pbar.set_postfix({'Red Reward': red_episode_reward, 'Blue Reward': blue_episode_reward, 'Epsilon': eps})
                 pbar.update(1)
 
-                # 每100步可视化棋盘
+                # 每100步可视化推理棋盘
                 if t % 100 == 0:
-                    env.visualize_full_board()
+                    env.visualize_inferred_board(player_color=current_player)
+
+                # 检查是否有战斗发生并记录战斗信息
+                if 'battle_info' in info:
+                    battle_info = info['battle_info']
+                    last_move = (current_agent.get_piece_by_index(action // (env.board_rows * env.board_cols)), (action // env.board_cols % env.board_rows, action % env.board_cols), next_state)
+                    env.visualize_full_board(last_move=last_move, battle_info=battle_info)
+                    battle_info = None  # 重置战斗信息
 
                 # 检查是否有玩家获胜
                 winner = env.check_winner(current_player)
@@ -149,6 +157,7 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
             f.write(' '.join(map(str, episode)) + '\n')
 
     return agent_red, agent_blue
+
 
 # 初始化环境和智能体
 initial_board = [red_pieces, blue_pieces]  # 初始化棋盘
