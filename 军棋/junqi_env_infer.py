@@ -5,6 +5,7 @@ import random
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 from reward_model_infer import RewardModel
+from pieces import Piece
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
 
@@ -26,7 +27,7 @@ piece_encoding = {
 class JunQiEnvInfer(gym.Env):
     metadata = {'render.modes': ['human']}
     
-    def __init__(self, initial_board):
+    def __init__(self, initial_board=None):
         super(JunQiEnvInfer, self).__init__()
         self.board_rows = 13
         self.board_cols = 5
@@ -42,6 +43,7 @@ class JunQiEnvInfer(gym.Env):
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.board_rows, self.board_cols, len(self.piece_types)), dtype=np.float32)
         self.move_history = []
         self.battle_history = []
+        self.turn = 0
 
         self.reset()
 
@@ -61,32 +63,102 @@ class JunQiEnvInfer(gym.Env):
         self.turn = 0
         self.move_history = []
         self.battle_history = []
-        self.generate_random_histories()  # 生成随机的move_history和battle_history
+        self.generate_random_histories()
         return self.get_state()
-
+    
     def generate_random_histories(self):
-        piece_positions = [(piece, piece.get_position()) for piece in self.blue_pieces]
-        random.shuffle(piece_positions)
-        
-        # 生成随机移动历史
-        num_moves = random.randint(5, 15)
-        for _ in range(num_moves):
-            piece, pos = random.choice(piece_positions)
+        def move_and_battle(piece, piece_list, opponent_positions):
+            pos = piece.get_position()
             valid_moves = self.get_valid_moves(piece)
-            if valid_moves:
-                new_pos = random.choice(valid_moves)
-                self.move_history.append((piece, pos, new_pos))
+            opponent_positions_set = {pos for _, pos in opponent_positions}
+
+            # 优先选择包含对方棋子的有效位置
+            battle_moves = [move for move in valid_moves if move in opponent_positions_set]
+            if battle_moves:
+                new_pos = random.choice(battle_moves)
+            else:
+                new_pos = random.choice(valid_moves) if valid_moves else None
+
+            if new_pos:
+                self.move_history.append((pos, piece, new_pos))  # 存储的是位置元组
                 piece.set_position(new_pos)
+                return new_pos
+            return None
 
-        # 生成随机战斗历史
-        num_battles = random.randint(3, 10)
-        for _ in range(num_battles):
-            attacker, attacker_pos = random.choice(piece_positions)
-            defender, defender_pos = random.choice(piece_positions)
-            if attacker.get_color() != defender.get_color() and attacker_pos != defender_pos:
-                result = self.resolve_battle(attacker, defender)
-                self.battle_history.append((attacker, defender, result))
+        def select_piece_with_battle(piece_positions, opponent_positions_set):
+            battle_pieces = [piece for piece, pos in piece_positions if pos in opponent_positions_set]
+            if battle_pieces:
+                return random.choice(battle_pieces)
+            else:
+                return random.choice(piece_positions)[0] if piece_positions else None
 
+        piece_positions_red = [(piece, piece.get_position()) for piece in self.red_pieces if piece.get_position()]
+        piece_positions_blue = [(piece, piece.get_position()) for piece in self.blue_pieces if piece.get_position()]
+
+        for _ in range(1000):  # 模拟 1000 步
+            opponent_positions_blue_set = {pos for _, pos in piece_positions_blue}
+            opponent_positions_red_set = {pos for _, pos in piece_positions_red}
+
+            # 选择红方棋子并移动
+            if piece_positions_red:
+                piece = select_piece_with_battle(piece_positions_red, opponent_positions_blue_set)
+                if piece:
+                    new_pos = move_and_battle(piece, self.red_pieces, piece_positions_blue)
+                    if new_pos:
+                        # 检查是否有碰撞并记录战斗
+                        for blue_piece, blue_pos in piece_positions_blue:
+                            if new_pos == blue_pos:
+                                result = self.resolve_battle(piece, blue_piece)
+                                if result == 'win':
+                                    self.battle_history.append((piece.get_position(), blue_piece.get_position(), result))
+                                elif result == 'draw':
+                                    self.battle_history.append((piece.get_position(), blue_piece.get_position(), 'draw'))
+                                elif result == 'lose':
+                                    self.battle_history.append((blue_piece.get_position(), piece.get_position(), 'win'))
+                                piece_positions_red = [(p, p.get_position()) for p in self.red_pieces if p.get_position()]
+                                piece_positions_blue = [(p, p.get_position()) for p in self.blue_pieces if p.get_position()]
+                                break  # 立即跳出，避免重复检查
+
+            # 选择蓝方棋子并移动
+            if piece_positions_blue:
+                piece = select_piece_with_battle(piece_positions_blue, opponent_positions_red_set)
+                if piece:
+                    new_pos = move_and_battle(piece, self.blue_pieces, piece_positions_red)
+                    if new_pos:
+                        # 检查是否有碰撞并记录战斗
+                        for red_piece, red_pos in piece_positions_red:
+                            if new_pos == red_pos:
+                                result = self.resolve_battle(piece, red_piece)
+                                if result == 'win':
+                                    self.battle_history.append((piece.get_position(), red_piece.get_position(), result))
+                                elif result == 'draw':
+                                    self.battle_history.append((piece.get_position(), red_piece.get_position(), 'draw'))
+                                elif result == 'lose':
+                                    self.battle_history.append((red_piece.get_position(), piece.get_position(), 'win'))
+                                piece_positions_red = [(p, p.get_position()) for p in self.red_pieces if p.get_position()]
+                                piece_positions_blue = [(p, p.get_position()) for p in self.blue_pieces if p.get_position()]
+                                break  # 立即跳出，避免重复检查
+
+    def piece_name_to_value(self, piece_name):
+        """
+        Converts a piece name to its corresponding value.
+        """
+        value_map = {
+            '地雷': 1,
+            '炸弹': 2,
+            '司令': 3,
+            '军长': 4,
+            '师长': 5,
+            '旅长': 6,
+            '团长': 7,
+            '营长': 8,
+            '连长': 9,
+            '排长': 10,
+            '工兵': 11,
+            '军旗': 12,
+        }
+        return value_map.get(piece_name, 0)
+    
     def resolve_battle(self, attacker, defender):
         piece_value = self.piece_name_to_value(attacker.get_name())
         target_value = self.piece_name_to_value(defender.get_name())
@@ -147,7 +219,7 @@ class JunQiEnvInfer(gym.Env):
 
     def get_state(self):
         state = np.zeros((self.board_rows, self.board_cols, len(self.piece_types)))
-        for piece in self.blue_pieces:
+        for piece in self.red_pieces + self.blue_pieces:
             if piece.position:
                 x, y = piece.position
                 if 0 <= x < self.board_rows and 0 <= y < self.board_cols:
@@ -156,7 +228,8 @@ class JunQiEnvInfer(gym.Env):
         return {
             'board_state': state,
             'move_history': self.move_history,
-            'battle_history': self.battle_history
+            'battle_history': self.battle_history,
+            'agent_color': 'red' if self.turn % 2 == 0 else 'blue'  # 假设轮流行动，红方先手
         }
 
     def step(self, action):
@@ -164,19 +237,54 @@ class JunQiEnvInfer(gym.Env):
         reward = self.calculate_reward(inferred_pieces)
         done = self.is_terminal_state()
         info = {}
+        self.turn += 1  # 更新回合数
         return self.get_state(), reward, done, info
 
 
     def calculate_reward(self, inferred_pieces):
-        # 根据推理结果计算奖励
         actual_pieces = self.get_actual_pieces()
-        correct_inferences = 0
-        total_inferences = len(inferred_pieces)
-        for pos, piece in inferred_pieces.items():
-            if pos in actual_pieces and actual_pieces[pos] == piece:
-                correct_inferences += 1
-        return (correct_inferences / total_inferences)
-    
+        reward = 0
+
+        # 定义不同棋子的权重
+        piece_weights = {
+            '司令': 5,
+            '军长': 4,
+            '炸弹': 3,
+            '地雷': 3,
+            '师长': 2,
+            '旅长': 2,
+            '团长': 1,
+            '营长': 1,
+            '连长': 1,
+            '排长': 1,
+            '工兵': 1,
+            '军旗': 0
+        }
+
+        # 获取棋子周围位置的辅助函数
+        def get_nearby_positions(pos):
+            x, y = pos
+            nearby_positions = [
+                (x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1),
+                (x - 1, y - 1), (x - 1, y + 1), (x + 1, y - 1), (x + 1, y + 1)
+            ]
+            return [(nx, ny) for nx, ny in nearby_positions if 0 <= nx < self.board_rows and 0 <= ny < self.board_cols]
+
+        for pos, inferred_type in inferred_pieces.items():
+            if pos in actual_pieces:
+                actual_type = actual_pieces[pos]
+                if inferred_type == actual_type:
+                    reward += piece_weights.get(actual_type, 1)
+                elif inferred_type in piece_weights and actual_type in piece_weights:
+                    reward += piece_weights[actual_type] - piece_weights[inferred_type]
+
+            # 邻近位置奖励
+            nearby_positions = get_nearby_positions(pos)
+            for nearby_pos in nearby_positions:
+                if nearby_pos in actual_pieces and inferred_type == actual_pieces[nearby_pos]:
+                    reward += piece_weights.get(actual_pieces[nearby_pos], 1) / 2  # 邻近位置奖励减半
+
+        return reward
 
     def get_actual_pieces(self):
         actual_pieces = {}
@@ -187,11 +295,16 @@ class JunQiEnvInfer(gym.Env):
         return actual_pieces
 
     def is_terminal_state(self):
+        # 达到特定回合数时结束游戏
+        max_turns = 10  # 设置最大回合数
+        if self.turn >= max_turns:
+            return True
         return False
 
+
     def create_pieces(self, initial_board):
-        red_pieces = initial_board[0]
-        blue_pieces = initial_board[1]
+        red_pieces = initial_board[0] if initial_board else self.generate_random_pieces('red')
+        blue_pieces = initial_board[1] if initial_board else self.generate_random_pieces('blue')
         for piece in red_pieces:
             position = piece.get_position()
             self.occupied_positions_red.add(position)
@@ -200,26 +313,17 @@ class JunQiEnvInfer(gym.Env):
             self.occupied_positions_blue.add(position)
         return red_pieces, blue_pieces
 
-    def get_valid_moves(self, piece):
-        current_position = piece.get_position()
-        valid_moves = set()
-
-        if not current_position or piece.get_name() in ['军旗', '地雷']:
-            return list(valid_moves)
-
-        if self.is_railway(current_position):
-            if piece.get_name() == '工兵':
-                valid_moves.update(self.get_railway_moves_for_worker(current_position, piece))
-            else:
-                valid_moves.update(self.get_railway_moves(current_position, piece))
-
-        valid_moves.update(self.get_road_moves(current_position, piece))
-        camps = self.get_camps()
-        occupied_camps = set(camps) & (self.occupied_positions_red | self.occupied_positions_blue)
-        valid_moves = [move for move in valid_moves if move not in occupied_camps]
-        valid_moves = [move for move in valid_moves if not self.is_friendly_occupied(move, piece.get_color())]
-
-        return list(valid_moves)
+    def generate_random_pieces(self, color):
+        pieces = []
+        positions = set()
+        for piece_name in self.piece_types:
+            while True:
+                position = (random.randint(0, self.board_rows - 1), random.randint(0, self.board_cols - 1))
+                if position not in positions:
+                    pieces.append(Piece(piece_name, position, color))
+                    positions.add(position)
+                    break
+        return pieces
 
     def get_railway_moves_for_worker(self, start_position, piece):
         valid_moves = set()
@@ -253,7 +357,7 @@ class JunQiEnvInfer(gym.Env):
         self.expand_in_direction(current_position, color, valid_moves, is_horizontal=False)
 
         return valid_moves
-
+    
     def expand_in_direction(self, current_position, color, valid_moves, is_horizontal):
         if is_horizontal:
             y = current_position[1] - 1
@@ -318,15 +422,14 @@ class JunQiEnvInfer(gym.Env):
         return valid_moves
     
     def decode_action(self, action):
-        inferred_pieces = {}
-        total_positions = self.action_space.n // len(self.piece_types)
+        total_positions = self.board_rows * self.board_cols
         piece_index = action // total_positions
         position_index = action % total_positions
+        piece_index = piece_index % len(self.piece_types)  # 确保piece_index在有效范围内
+        piece_type = self.piece_types[piece_index]
         x = position_index // self.board_cols
         y = position_index % self.board_cols
-        piece_type = self.piece_types[piece_index]
-        inferred_pieces[(x, y)] = piece_type
-        return inferred_pieces
+        return {(x, y): piece_type}
 
     def is_occupied(self, position):
         return position in self.occupied_positions_red or position in self.occupied_positions_blue

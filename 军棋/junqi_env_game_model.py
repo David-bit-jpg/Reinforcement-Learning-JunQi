@@ -1159,7 +1159,3 @@ class JunQiEnvGame(gym.Env):
                 ax2.text(x, y, piece.get_name(), ha='center', va='center', fontsize=12, color=color, bbox=dict(facecolor='white', edgecolor=color, boxstyle='round,pad=0.3'), fontproperties=font_prop)
 
         plt.show()
-        
-    def get_action_space_size(self):
-        return (len(self.red_pieces) + len(self.blue_pieces)) * (self.board_rows * self.board_cols)
-

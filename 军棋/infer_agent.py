@@ -9,29 +9,37 @@ from junqi_env_setup import JunQiEnvSetUp
 from dqn_agent_setup import DQNAgent as DQNAgentSetUp
 from tqdm import tqdm
 
-# 设置参数
-BATCH_SIZE = 64
-GAMMA = 0.99
-TAU = 1e-3
-LR = 1e-3
-EPISODES = 1000
-MEMORY_SIZE = 10000
+piece_encoding = {
+    '地雷': 1,
+    '炸弹': 2,
+    '司令': 3,
+    '军长': 4,
+    '师长': 5,
+    '旅长': 6,
+    '团长': 7,
+    '营长': 8,
+    '连长': 9,
+    '排长': 10,
+    '工兵': 11,
+    '军旗': 12,
+}
+env = JunQiEnvSetUp()
+state_size = env.observation_space.shape[0] * env.observation_space.shape[1] * env.observation_space.shape[2]
+action_size = env.get_action_space_size()
+agent = DQNAgentSetUp(state_size, action_size, env, seed=0)
 
-# 加载布局模型
-env_setup = JunQiEnvSetUp()
-state_size = env_setup.observation_space.shape[0] * env_setup.observation_space.shape[1] * env_setup.observation_space.shape[2]
-action_size = env_setup.get_action_space_size()
-agent_setup = DQNAgentSetUp(state_size, action_size, env_setup, seed=0)
-agent_setup.qnetwork_local.load_state_dict(torch.load('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/setup_model.pth'))
-agent_setup.qnetwork_local.eval()
+# 加载训练好的模型权重
+agent.qnetwork_local.load_state_dict(torch.load('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/setup_model.pth'))
 
-# 生成布局
+# 设置模型为评估模式
+agent.qnetwork_local.eval()
+
 def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
     while True:
         state = env.reset()
         state = state.flatten()
         for t in range(max_t):
-            action = agent.act(state, epsilon)
+            action = agent.act(state, epsilon)  # 调用时传递 epsilon 参数
             if action is None:
                 break
             next_state, reward, done, _ = env.step(action)
@@ -39,50 +47,105 @@ def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
             state = next_state
             if done:
                 break
+
+        # 检查是否所有棋子都有确定的位置
         all_pieces_placed = all(piece.get_position() is not None for piece in env.red_pieces + env.blue_pieces)
         if all_pieces_placed:
             break
 
-generate_deployment(env_setup, agent_setup, epsilon=0.2)
-red_pieces = env_setup.red_pieces
-blue_pieces = env_setup.blue_pieces
-initial_board = [red_pieces, blue_pieces]
+# 生成布局
+generate_deployment(env, agent, epsilon=0.2)  # 调整 epsilon 值来控制随机性
 
-# 初始化推理环境
+red_pieces = env.red_pieces
+blue_pieces = env.blue_pieces
+
+initial_board = [red_pieces, blue_pieces]
 env_infer = JunQiEnvInfer(initial_board)
 model = DoubleDQN(env_infer.board_rows, env_infer.board_cols, env_infer.piece_types)
 target_model = DoubleDQN(env_infer.board_rows, env_infer.board_cols, env_infer.piece_types)
-memory = Memory(capacity=10000)
-agent_infer = DQNAgent(model, target_model, memory, env_infer.piece_types, env_infer.board_rows, env_infer.board_cols)
-
-# 训练函数
+agent_infer = DQNAgent(model, target_model, action_size)
 def train_agent(env, agent, episodes=1000):
-    for e in range(episodes):
-        state = env.reset()
-        state = np.transpose(state['board_state'], (2, 0, 1))  # 调整状态的维度顺序
-        state = state[:3]  # 确保状态只有3个通道
-        state = np.expand_dims(state, axis=0)  # 增加一个维度
-        done = False
-        total_reward = 0
+    rewards = []
+    losses = []
+    
+    # 创建一个 tqdm 进度条
+    with tqdm(total=episodes, desc="Training Progress", unit="episode") as pbar:
+        for e in range(episodes):
+            state_dict = env.reset()
+            board_state = state_dict['board_state']
+            transposed_state = np.transpose(board_state, (2, 0, 1))
 
-        while not done:
-            action = agent.act(state)
-            next_state, reward, done, info = env.step(action)
-            next_state = np.transpose(next_state['board_state'], (2, 0, 1))
-            next_state = next_state[:3]  # 确保状态只有3个通道
-            next_state = np.expand_dims(next_state, axis=0)
-            total_reward += reward
+            channels = transposed_state.shape[0]
+            height = transposed_state.shape[1]
+            width = transposed_state.shape[2]
+            padded_state = np.zeros((1, channels, height, width))
+            padded_state[0, :channels, :height, :width] = transposed_state
 
-            agent.remember(state, action, reward, next_state, done)
-            state = next_state
+            state = {'board_state': padded_state, 'move_history': state_dict['move_history'], 'battle_history': state_dict['battle_history'], 'agent_color': 'red'}
 
-            agent.replay()
-        
-        print(f"Episode: {e+1}/{episodes}, Total Reward: {total_reward}, Epsilon: {agent.epsilon:.2f}")
+            done = False
+            total_reward = 0
+            episode_losses = []
 
+            while not done:
+                action, inferred_pieces = agent.act(state)
+                next_state_dict, reward, done, info = env.step(action)
+                next_board_state = next_state_dict['board_state']
+                next_transposed_state = np.transpose(next_board_state, (2, 0, 1))
 
-# 训练agent
-train_agent(env_infer, agent_infer, episodes=EPISODES)
+                next_channels = next_transposed_state.shape[0]
+                next_height = next_transposed_state.shape[1]
+                next_width = next_transposed_state.shape[2]
+                next_padded_state = np.zeros((1, next_channels, next_height, next_width))
+                next_padded_state[0, :next_channels, :next_height, :next_width] = next_transposed_state
 
+                next_state = {'board_state': next_padded_state, 'move_history': next_state_dict['move_history'], 'battle_history': next_state_dict['battle_history'], 'agent_color': 'red'}
+
+                agent.remember(state, action, reward, next_state, done)
+                state = next_state
+                total_reward += reward
+
+                loss = agent.replay()
+                if loss is not None:
+                    episode_losses.append(loss.item())
+
+            rewards.append(total_reward)
+            if episode_losses:
+                avg_loss = sum(episode_losses) / len(episode_losses)
+                losses.append(avg_loss)
+            else:
+                losses.append(0)
+
+            # 更新进度条
+            pbar.set_postfix({"Total Reward": total_reward, "Avg Loss": avg_loss if episode_losses else 0})
+            pbar.update(1)
+
+            print(f"Episode: {e+1}/{episodes}, Total Reward: {total_reward}, Epsilon: {agent.epsilon:.2f}")
+
+    return rewards, losses
+
+# 训练 agent
+rewards, losses = train_agent(env_infer, agent_infer, episodes=1000)
 # 保存模型权重
-torch.save(agent_infer.model.state_dict(), '/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/infer_model.pth')
+agent_infer.save('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/infer_model.pth')
+
+# 绘制奖励和损失图表
+def plot_training_progress(rewards, losses):
+    fig, ax1 = plt.subplots()
+
+    color = 'tab:blue'
+    ax1.set_xlabel('Episode')
+    ax1.set_ylabel('Total Reward', color=color)
+    ax1.plot(rewards, color=color)
+    ax1.tick_params(axis='y', labelcolor=color)
+
+    ax2 = ax1.twinx()
+    color = 'tab:red'
+    ax2.set_ylabel('Average Loss', color=color)
+    ax2.plot(losses, color=color)
+    ax2.tick_params(axis='y', labelcolor=color)
+
+    fig.tight_layout()
+    plt.show()
+
+plot_training_progress(rewards, losses)

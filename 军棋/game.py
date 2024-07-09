@@ -1,76 +1,87 @@
 import random
 from junqi_env_game import JunQiEnvGame  # 确保你的环境文件名为 junqi_env_game.py
 from pieces import Piece
+from junqi_env_infer import JunQiEnvInfer
+import torch
+import numpy as np
+import random
+from collections import deque
+import matplotlib.pyplot as plt
+from dqn_agent_infer import DQNAgent, DoubleDQN, Memory
+from junqi_env_infer import JunQiEnvInfer
+from junqi_env_setup import JunQiEnvSetUp
+from dqn_agent_setup import DQNAgent as DQNAgentSetUp
+from tqdm import tqdm
 
-def get_random_positions(env, num_positions):
-    all_positions = [(x, y) for x in range(env.board_rows) for y in range(env.board_cols) if (x, y) not in [(6, 1), (6, 3)]]
-    return random.sample(all_positions, num_positions)
+piece_encoding = {
+    '地雷': 1,
+    '炸弹': 2,
+    '司令': 3,
+    '军长': 4,
+    '师长': 5,
+    '旅长': 6,
+    '团长': 7,
+    '营长': 8,
+    '连长': 9,
+    '排长': 10,
+    '工兵': 11,
+    '军旗': 12,
+}
+env = JunQiEnvSetUp()
+state_size = env.observation_space.shape[0] * env.observation_space.shape[1] * env.observation_space.shape[2]
+action_size = env.get_action_space_size()
+agent = DQNAgentSetUp(state_size, action_size, env, seed=0)
 
-# 示例初始棋盘配置，包含红方和蓝方棋子
-initial_board = (
-    [
-        Piece("司令", 10, "red", []), Piece("军长", 9, "red", []), Piece("师长", 8, "red", []),
-        Piece("旅长", 7, "red", []), Piece("团长", 6, "red", []), Piece("营长", 5, "red", []),
-        Piece("连长", 4, "red", []), Piece("排长", 3, "red", []), Piece("工兵", 1, "red", []),
-        Piece("炸弹", 2, "red", []), Piece("地雷", 1, "red", []), Piece("军旗", 0, "red", [])
-    ],  # Red pieces
-    [
-        Piece("司令", 10, "blue", []), Piece("军长", 9, "blue", []), Piece("师长", 8, "blue", []),
-        Piece("旅长", 7, "blue", []), Piece("团长", 6, "blue", []), Piece("营长", 5, "blue", []),
-        Piece("连长", 4, "blue", []), Piece("排长", 3, "blue", []), Piece("工兵", 1, "blue", []),
-        Piece("炸弹", 2, "blue", []), Piece("地雷", 1, "blue", []), Piece("军旗", 0, "blue", [])
-    ]  # Blue pieces
-)
+# 加载训练好的模型权重
+agent.qnetwork_local.load_state_dict(torch.load('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/setup_model.pth'))
 
-env = JunQiEnvGame(initial_board, 10, 10, 10)
+# 设置模型为评估模式
+agent.qnetwork_local.eval()
 
-# 随机分配红方和蓝方棋子位置，确保不重复
-red_positions = get_random_positions(env, len(initial_board[0]))
-blue_positions = get_random_positions(env, len(initial_board[1]))
-for i, piece in enumerate(initial_board[0]):
-    piece.set_position(red_positions[i])
-for i, piece in enumerate(initial_board[1]):
-    piece.set_position(blue_positions[i])
+def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
+    while True:
+        state = env.reset()
+        state = state.flatten()
+        for t in range(max_t):
+            action = agent.act(state, epsilon)  # 调用时传递 epsilon 参数
+            if action is None:
+                break
+            next_state, reward, done, _ = env.step(action)
+            next_state = next_state.flatten()
+            state = next_state
+            if done:
+                break
 
-# 更新 occupied positions
-env.reset()
+        # 检查是否所有棋子都有确定的位置
+        all_pieces_placed = all(piece.get_position() is not None for piece in env.red_pieces + env.blue_pieces)
+        if all_pieces_placed:
+            break
 
-# 固定选择红方和蓝方的棋子
-red_pieces = initial_board[0]
-blue_pieces = initial_board[1]
+# 生成布局
+generate_deployment(env, agent, epsilon=0.2)  # 调整 epsilon 值来控制随机性
 
-def simulate_battle(env, red_piece, blue_piece):
-    target_position = blue_piece.get_position()
+red_pieces = env.red_pieces
+blue_pieces = env.blue_pieces
 
-    # 打印战斗前状态
-    print(f"战斗前状态：")
-    print(f"红方棋子：{red_piece.get_name()} 在 {red_piece.get_position()}")
-    print(f"蓝方棋子：{blue_piece.get_name()} 在 {blue_piece.get_position()}")
+# 定义训练超参数
+BATCH_SIZE = 64
+GAMMA = 0.99
+TAU = 1e-3
+LR = 1e-3
+EPISODES = 1000
+MEMORY_SIZE = 10000
 
-    # 进行战斗并更新位置
-    initial_state = env.get_state()
-    env.make_move('red', red_piece, target_position)
+# 初始化环境和智能体
+initial_board = [red_pieces, blue_pieces]
 
-    # 检查战斗结果
-    target_piece = env.get_piece_at_position(target_position)
-    if target_piece and target_piece.get_color() != red_piece.get_color():
-        battle_result = env.battle(red_piece, target_piece)
-        if battle_result == 'win_battle':
-            print(f"红方的 {red_piece.get_name()} 吃掉了 蓝方的 {target_piece.get_name()}")
-        elif battle_result == 'lose_battle':
-            print(f"红方的 {red_piece.get_name()} 被 蓝方的 {target_piece.get_name()} 吃掉了")
-        else:
-            print(f"红方的 {red_piece.get_name()} 和 蓝方的 {target_piece.get_name()} 打成平手")
-    else:
-        print(f"没有战斗发生，红方的 {red_piece.get_name()} 移动到了 {target_position}")
+env_infer = JunQiEnvInfer(initial_board)
+model = DoubleDQN(env_infer.board_rows, env_infer.board_cols, env_infer.piece_types)
+target_model = DoubleDQN(env_infer.board_rows, env_infer.board_cols, env_infer.piece_types)
+memory = Memory(capacity=10000)
+PREFILL_STEPS = 2000  # 根据需要调整这个值
+action_size = env_infer.action_space.n  # 获取动作空间的大小
+agent_infer = DQNAgent(model, target_model, memory, action_size, env_infer.board_rows, env_infer.board_cols)
 
-    # 打印战斗后状态
-    print(f"战斗后状态：")
-    print(f"红方棋子：{red_piece.get_name()} 在 {red_piece.get_position()}")
-    if target_piece:
-        print(f"蓝方棋子：{target_piece.get_name()} 在 {target_piece.get_position()}")
+env_infer.generate_random_histories()
 
-# 随机选择一个红方和蓝方的棋子进行战斗模拟
-red_piece = random.choice(red_pieces)
-blue_piece = random.choice(blue_pieces)
-simulate_battle(env, red_piece, blue_piece)
+print(env_infer.battle_history)
