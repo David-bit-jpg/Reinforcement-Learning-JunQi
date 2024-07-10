@@ -14,16 +14,17 @@ from tqdm import tqdm
 MODEL_SAVE_PATH = "/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_model.pth"
 os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
 
-env = JunQiEnvSetUp()
-state_size = env.observation_space.shape[0] * env.observation_space.shape[1] * env.observation_space.shape[2]
-action_size = env.get_action_space_size()
-agent = DQNAgentSetUp(state_size, action_size, env, seed=0)
+# 初始化布局环境和布局代理
+env_setup = JunQiEnvSetUp()
+state_size_setup = env_setup.observation_space.shape[0] * env_setup.observation_space.shape[1] * env_setup.observation_space.shape[2]
+action_size_setup = env_setup.get_action_space_size()
+agent_setup = DQNAgentSetUp(state_size_setup, action_size_setup, env_setup, seed=0)
 
 # 加载训练好的模型权重
-agent.qnetwork_local.load_state_dict(torch.load('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/setup_model.pth'))
+agent_setup.qnetwork_local.load_state_dict(torch.load('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/setup_model.pth'))
 
 # 设置模型为评估模式
-agent.qnetwork_local.eval()
+agent_setup.qnetwork_local.eval()
 
 def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
     while True:
@@ -45,25 +46,19 @@ def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
             break
 
 # 生成布局
-generate_deployment(env, agent, epsilon=0.2)  # 调整 epsilon 值来控制随机性
+generate_deployment(env_setup, agent_setup, epsilon=0.2)  # 调整 epsilon 值来控制随机性
 
-red_pieces = env.red_pieces
-blue_pieces = env.blue_pieces
-
-# 定义训练超参数
-BATCH_SIZE = 64
-GAMMA = 0.99
-TAU = 1e-3
-LR = 1e-3
-EPISODES = 1000
-MEMORY_SIZE = 10000
+red_pieces = env_setup.red_pieces
+blue_pieces = env_setup.blue_pieces
 
 # 初始化环境和智能体
 initial_board = [red_pieces, blue_pieces]  # 初始化棋盘
-env = JunQiEnvGame(initial_board, input_size=13*5*3, hidden_size=128, output_size=65, lr=0.001)
+env = JunQiEnvGame(initial_board, input_size=13 * 5 * 4, hidden_size=128, output_size=65, lr=0.001)
 state_size = env.get_state_size()
 action_size = len(env.red_pieces) * env.board_rows * env.board_cols
-agent = DQNAgent(state_size, action_size, env, seed=0)
+agent_red = DQNAgent(state_size, action_size, env, seed=0)
+agent_blue = DQNAgent(state_size, action_size, env, seed=1)
+
 def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay):
     scores = []
     eps = epsilon_start
@@ -158,15 +153,7 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
 
     return agent_red, agent_blue
 
-
-# 初始化环境和智能体
-initial_board = [red_pieces, blue_pieces]  # 初始化棋盘
-env = JunQiEnvGame(initial_board, input_size=13*5*3, hidden_size=128, output_size=65, lr=0.001)
-state_size = env.get_state_size()
-action_size = len(env.red_pieces) * env.board_rows * env.board_cols
-agent_red = DQNAgent(state_size, action_size, env, seed=0)
-agent_blue = DQNAgent(state_size, action_size, env, seed=1)
-
+# 训练代理
 num_episodes = 1000
 max_t = 1000
 epsilon_start = 1.0

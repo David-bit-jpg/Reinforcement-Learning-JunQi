@@ -62,26 +62,33 @@ generate_deployment(env, agent, epsilon=0.2)  # 调整 epsilon 值来控制随�
 
 red_pieces = env.red_pieces
 blue_pieces = env.blue_pieces
-
-# 定义训练超参数
-BATCH_SIZE = 64
-GAMMA = 0.99
-TAU = 1e-3
-LR = 1e-3
-EPISODES = 1000
-MEMORY_SIZE = 10000
-
-# 初始化环境和智能体
+# 初始化环境和代理
 initial_board = [red_pieces, blue_pieces]
+env = JunQiEnvInfer(initial_board)
+initial_state = env.reset()
+# print("Initial State:", initial_state)
 
-env_infer = JunQiEnvInfer(initial_board)
-model = DoubleDQN(env_infer.board_rows, env_infer.board_cols, env_infer.piece_types)
-target_model = DoubleDQN(env_infer.board_rows, env_infer.board_cols, env_infer.piece_types)
-memory = Memory(capacity=10000)
-PREFILL_STEPS = 2000  # 根据需要调整这个值
-action_size = env_infer.action_space.n  # 获取动作空间的大小
-agent_infer = DQNAgent(model, target_model, memory, action_size, env_infer.board_rows, env_infer.board_cols)
+model = DoubleDQN(env.board_rows, env.board_cols, env.piece_types)
+target_model = DoubleDQN(env.board_rows, env.board_cols, env.piece_types)
+action_size = env.action_space.n
+agent = DQNAgent(model, target_model, action_size,initial_board)
 
-env_infer.generate_random_histories()
+# 检查状态获取
+state = env.get_state()
+# print("State after reset:", state)
 
-print(env_infer.battle_history)
+# 检查代理决策
+action, inferred_pieces = agent.act(state)
+# print("Action:", action)
+print("Inferred Pieces:", inferred_pieces)
+
+# 检查动作执行和状态转换
+next_state, reward, done, info = env.step(action)
+# print("Next State:", next_state)
+# print("Reward:", reward)
+# print("Done:", done)
+# print("Info:", info)
+
+# 检查记忆存储
+agent.remember(state, action, reward, next_state, done)
+# print("Memory after remember:", agent.memory.tree.data[:10])  # 只打印前10条数据

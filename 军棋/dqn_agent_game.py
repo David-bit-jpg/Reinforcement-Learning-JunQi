@@ -55,7 +55,7 @@ class PolicyValueNet(nn.Module):
         
         self.hidden_size = hidden_size
         
-        self.policy_head = nn.Linear(hidden_size, board_size * board_size)
+        self.policy_head = nn.Linear(hidden_size, 12)  # 12个棋子类别
         self.value_head = nn.Linear(hidden_size, 1)
 
     def forward(self, board_state, prob_matrix, turn, num_own_pieces, num_opponent_pieces, features):
@@ -64,23 +64,23 @@ class PolicyValueNet(nn.Module):
 
         board_state = F.relu(self.board_bn1(self.board_conv1(board_state)))
         board_state = F.relu(self.board_bn2(self.board_conv2(board_state)))
-        board_state = board_state.reshape(board_state.size(0), -1)  # 确保 board_state 是 2 维张量
-        
+        board_state = board_state.reshape(board_state.size(0), -1)  # 使用 .reshape() 而不是 .view()
+
         if prob_matrix.dim() == 2:
             prob_matrix = prob_matrix.unsqueeze(0).unsqueeze(0)  # 增加两个维度以符合卷积层输入要求
         elif prob_matrix.dim() == 3:
             prob_matrix = prob_matrix.unsqueeze(1)  # 增加一个维度以符合卷积层输入要求
 
         prob_matrix = F.relu(self.prob_bn(self.prob_conv(prob_matrix)))
-        prob_matrix = prob_matrix.reshape(prob_matrix.size(0), -1)  # 确保 prob_matrix 是 2 维张量
-        
-        turn = turn.reshape(turn.size(0), -1)  # 确保 turn 是 2 维张量
-        num_own_pieces = num_own_pieces.reshape(num_own_pieces.size(0), -1)  # 确保 num_own_pieces 是 2 维张量
-        num_opponent_pieces = num_opponent_pieces.reshape(num_opponent_pieces.size(0), -1)  # 确保 num_opponent_pieces 是 2 维张量
-        features = features.reshape(features.size(0), -1)  # 确保 features 是 2 维张量
+        prob_matrix = prob_matrix.reshape(prob_matrix.size(0), -1)  # 使用 .reshape() 而不是 .view()
+
+        turn = turn.reshape(turn.size(0), -1)  # 使用 .reshape() 而不是 .view()
+        num_own_pieces = num_own_pieces.reshape(num_own_pieces.size(0), -1)  # 使用 .reshape() 而不是 .view()
+        num_opponent_pieces = num_opponent_pieces.reshape(num_opponent_pieces.size(0), -1)  # 使用 .reshape() 而不是 .view()
+        features = features.reshape(features.size(0), -1)  # 使用 .reshape() 而不是 .view()
 
         combined = torch.cat([board_state, prob_matrix, turn, num_own_pieces, num_opponent_pieces, features], dim=1)
-        
+
         # 动态创建 fc1 层
         self.fc1 = nn.Linear(combined.size(1), self.hidden_size).to(combined.device)
         self.fc1_bn = nn.BatchNorm1d(self.hidden_size).to(combined.device)
@@ -90,29 +90,16 @@ class PolicyValueNet(nn.Module):
             x = F.relu(self.fc1_bn(x))
         else:
             x = F.relu(x)
-        
+
         policy = F.softmax(self.policy_head(x), dim=1)
         value = torch.tanh(self.value_head(x))
-        
+
         return policy, value
-
-    def pad_input(self, tensor, target_channels):
-        if tensor.dim() == 3:
-            tensor = tensor.unsqueeze(1)  # 增加一个维度以符合卷积层输入要求
-
-        if tensor.size(1) < target_channels:
-            padding = torch.zeros(tensor.size(0), target_channels - tensor.size(1), tensor.size(2), tensor.size(3)).to(self.device)
-            tensor = torch.cat((tensor, padding), dim=1)
-        elif tensor.size(1) > target_channels:
-            tensor = tensor[:, :target_channels, :, :]
-
-        return tensor
 
 class POMCP:
     def __init__(self, env,weights,num_simulations):
         self.env = env
         self.num_simulations = num_simulations
-        self.inference_model = env.inference_model
         self.weights = weights
         
     def update_weights(self, weights):
@@ -128,11 +115,11 @@ class POMCP:
         env_copy = copy.deepcopy(self.env)
         env_copy.set_state(state)
 
-        max_simulation_depth = 30 # 初始模拟深度
+        max_simulation_depth = 50 # 初始模拟深度
         if len(env_copy.red_pieces) + len(env_copy.blue_pieces) < 20:
-            max_simulation_depth = 40  # 棋子较少时增加模拟深度
+            max_simulation_depth = 60  # 棋子较少时增加模拟深度
         elif len(env_copy.red_pieces) + len(env_copy.blue_pieces) < 10:
-            max_simulation_depth = 50  # 棋子更少时进一步增加模拟深度
+            max_simulation_depth = 100  # 棋子更少时进一步增加模拟深度
 
         for _ in range(max_simulation_depth):  # 使用动态调整后的模拟深度
             valid_actions = env_copy.get_valid_actions(player_color)

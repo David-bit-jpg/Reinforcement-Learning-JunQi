@@ -61,85 +61,68 @@ red_pieces = env.red_pieces
 blue_pieces = env.blue_pieces
 
 initial_board = [red_pieces, blue_pieces]
-env_infer = JunQiEnvInfer(initial_board)
-model = DoubleDQN(env_infer.board_rows, env_infer.board_cols, env_infer.piece_types)
-target_model = DoubleDQN(env_infer.board_rows, env_infer.board_cols, env_infer.piece_types)
-agent_infer = DQNAgent(model, target_model, action_size)
+import gym
+import numpy as np
+from dqn_agent_infer import DQNAgent, DoubleDQN
 
-def train_agent(env, agent, episodes=1000):
+import gym
+import numpy as np
+from dqn_agent_infer import DQNAgent, DoubleDQN
+import numpy as np
+
+def train_agent(env, agent, episodes=3000):
     rewards = []
     losses = []
-    
-    # 创建一个 tqdm 进度条
-    with tqdm(total=episodes, desc="Training Progress", unit="episode") as pbar:
-        for e in range(episodes):
-            state_dict = env.reset()
-            board_state = state_dict['board_state']
-            transposed_state = np.transpose(board_state, (2, 0, 1))
 
-            channels = transposed_state.shape[0]
-            height = transposed_state.shape[1]
-            width = transposed_state.shape[2]
-            padded_state = np.zeros((1, channels, height, width))
-            padded_state[0, :channels, :height, :width] = transposed_state
+    for e in range(episodes):
+        state = env.reset()
+        total_reward = 0
+        done = False
+        loss_list = []
 
-            state = {
-                'board_state': padded_state, 
-                'move_history': state_dict['move_history'], 
-                'battle_history': state_dict['battle_history'], 
-                'agent_color': 'red', 
-                'opponent_commander_dead': state_dict['opponent_commander_dead']
-            }
-
-            done = False
-            total_reward = 0
-            episode_losses = []
-
-            while not done:
+        while not done:
+            try:
                 action, inferred_pieces = agent.act(state)
-                next_state_dict, reward, done, info = env.step(action)
-                next_board_state = next_state_dict['board_state']
-                next_transposed_state = np.transpose(next_board_state, (2, 0, 1))
-
-                next_channels = next_transposed_state.shape[0]
-                next_height = next_transposed_state.shape[1]
-                next_width = next_transposed_state.shape[2]
-                next_padded_state = np.zeros((1, next_channels, next_height, next_width))
-                next_padded_state[0, :next_channels, :next_height, :next_width] = next_transposed_state
-
-                next_state = {
-                    'board_state': next_padded_state, 
-                    'move_history': next_state_dict['move_history'], 
-                    'battle_history': next_state_dict['battle_history'], 
-                    'agent_color': 'red', 
-                    'opponent_commander_dead': next_state_dict['opponent_commander_dead']
-                }
-
+                next_state, reward, done, _ = env.step(action)
+                
+                # 打印当前状态和动作以进行调试
+                print(f"Episode: {e}, State shape: {state['board_state'].shape}, Action: {action}")
+                
                 agent.remember(state, action, reward, next_state, done)
+                agent.replay()
                 state = next_state
                 total_reward += reward
+            except ValueError as ve:
+                print(f"ValueError encountered: {ve}")
+                print(f"State tensor shape: {state['board_state'].shape}")
+                raise ve
 
-                loss = agent.replay()
-                if loss is not None:
-                    episode_losses.append(loss.item())
+        rewards.append(total_reward)
+        if len(loss_list) > 0:
+            avg_loss = np.mean(loss_list)
+            losses.append(avg_loss)
+        else:
+            avg_loss = None
+            losses.append(None)
 
-            rewards.append(total_reward)
-            if episode_losses:
-                avg_loss = sum(episode_losses) / len(episode_losses)
-                losses.append(avg_loss)
-            else:
-                losses.append(0)
-
-            # 更新进度条
-            pbar.set_postfix({"Total Reward": total_reward, "Avg Loss": avg_loss if episode_losses else 0})
-            pbar.update(1)
-
-            print(f"Episode: {e+1}/{episodes}, Total Reward: {total_reward}, Epsilon: {agent.epsilon:.2f}")
+        if e % 10 == 0:
+            print(f"Episode: {e}/{episodes}, Reward: {total_reward}, Avg Loss: {avg_loss if avg_loss is not None else 'N/A'}")
 
     return rewards, losses
 
-# 训练 agent
-rewards, losses = train_agent(env_infer, agent_infer, episodes=1000)
+initial_board = [red_pieces, blue_pieces]
+
+env_infer = JunQiEnvInfer(initial_board=initial_board)
+state_shape = env_infer.observation_space.shape
+action_size = env_infer.action_space.n
+
+model = DoubleDQN(state_shape[0], state_shape[1], list(piece_encoding.keys()))
+target_model = DoubleDQN(state_shape[0], state_shape[1], list(piece_encoding.keys()))
+
+agent_infer = DQNAgent(model, target_model, action_size, initial_board)
+
+rewards, losses = train_agent(env_infer, agent_infer, episodes=3000)
+
 # 保存模型权重
 agent_infer.save('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/infer_model.pth')
 

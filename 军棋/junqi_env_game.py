@@ -11,6 +11,10 @@ import traceback
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import copy
+import torch
+from dqn_agent_infer import DQNAgent as DQNAgentInfer
+from dqn_agent_infer import DoubleDQN
+
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
 
@@ -28,167 +32,6 @@ piece_encoding = {
     '工兵': 11,
     '军旗': 12,
 }
-import numpy as np
-
-class InferenceModel:
-    def __init__(self, board_rows, board_cols, piece_types, env):
-        self.board_rows = board_rows
-        self.board_cols = board_cols
-        self.piece_types = piece_types
-        self.env = env
-        self.belief = np.ones((board_rows, board_cols, len(piece_types))) / len(piece_types)
-        self.move_history = []
-        self.battle_history = []
-        self.stationary_pieces = {}
-        self.flag_positions = {}
-
-    def update_belief(self, move_history, battle_history):
-        self.move_history.extend(move_history)
-        self.battle_history.extend(battle_history)
-
-        self.update_belief_from_move_history()
-        self.update_belief_from_battle_history()
-        self.update_belief_from_stationary_pieces()
-        self.update_belief_from_flag_positions()
-        self.update_belief_from_mine_positions()
-
-    def apply_initial_guess(self):
-        opponent_color = 'blue' if self.env.red_pieces[0].get_color() == 'red' else 'red'
-        opponent_base_line = 0 if opponent_color == 'blue' else 12
-        opponent_second_base_line = 1 if opponent_color == 'blue' else 11
-
-        for piece in self.env.get_pieces(opponent_color):
-            x, y = piece.get_position()
-            if x is not None and y is not None:
-                if x == opponent_base_line:
-                    if y in [1, 3]:
-                        self.belief[x, y, self.piece_types.index('军旗')] = 0.5
-                    self.belief[x, y, self.piece_types.index('地雷')] = 0.3
-                    self.belief[x, y, self.piece_types.index('司令')] = 0.1
-                    self.belief[x, y, self.piece_types.index('军长')] = 0.1
-                elif x == opponent_second_base_line:
-                    self.belief[x, y, self.piece_types.index('地雷')] = 0.3
-                elif self.env.is_railway((x, y)):
-                    self.belief[x, y, self.piece_types.index('工兵')] = 0.5
-                else:
-                    self.belief[x, y, self.piece_types.index('炸弹')] = 0.2
-                    self.belief[x, y, self.piece_types.index('师长')] = 0.2
-                    self.belief[x, y, self.piece_types.index('旅长')] = 0.2
-                    self.belief[x, y, self.piece_types.index('团长')] = 0.2
-
-                self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
-
-    def update_belief_from_move_history(self):
-        for move in self.move_history:
-            piece, start_pos, end_pos = move
-            x, y = end_pos
-            piece_type = piece.get_name()
-
-            if piece_type == '工兵':
-                self.belief[x, y, :] *= 1.5
-            else:
-                self.belief[x, y, :] *= 1.1
-            self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
-
-            if piece_type in ['司令', '军长']:
-                for nx, ny in self.get_neighboring_positions(end_pos):
-                    if self.is_valid_position((nx, ny)):
-                        self.belief[nx, ny, self.piece_types.index('炸弹')] *= 1.5
-                        self.belief[nx, ny, :] /= np.sum(self.belief[nx, ny, :])
-
-    def update_belief_from_battle_history(self):
-        for battle in self.battle_history:
-            attacker, defender, result = battle
-            attacker_pos = attacker.get_position()
-            defender_pos = defender.get_position()
-
-            if result == 'win':
-                if attacker_pos:
-                    x, y = attacker_pos
-                    self.belief[x, y, :] *= 1.2
-                    self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
-                if defender_pos:
-                    x, y = defender_pos
-                    self.belief[x, y, :] *= 0.8
-                    self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
-            elif result == 'lose':
-                if attacker_pos:
-                    x, y = attacker_pos
-                    self.belief[x, y, :] *= 0.8
-                    self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
-                if defender_pos:
-                    x, y = defender_pos
-                    self.belief[x, y, :] *= 1.2
-                    self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
-
-            if defender.get_name() == '司令' and result == 'win':
-                flag_position = self.get_flag_position(defender.get_color())
-                if flag_position:
-                    self.flag_positions[defender.get_color()] = flag_position
-
-    def update_belief_from_stationary_pieces(self):
-        for pos, data in self.stationary_pieces.items():
-            if data['moves'] == 0 and data['wins'] == 0:
-                self.belief[pos[0], pos[1], self.piece_types.index('地雷')] *= 1.5
-                self.belief[pos[0], pos[1], :] /= np.sum(self.belief[pos[0], pos[1], :])
-            elif data['wins'] > 2:
-                high_value_pieces = ['司令', '军长', '师长']
-                for piece in high_value_pieces:
-                    self.belief[pos[0], pos[1], self.piece_types.index(piece)] *= 1.2
-                self.belief[pos[0], pos[1], :] /= np.sum(self.belief[pos[0], pos[1], :])
-
-    def update_belief_from_flag_positions(self):
-        for color, position in self.flag_positions.items():
-            x, y = position
-            self.belief[x, y, :] = 0
-            self.belief[x, y, self.piece_types.index('军旗')] = 1
-            self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
-
-    def update_belief_from_mine_positions(self):
-        opponent_color = 'blue' if self.env.red_pieces[0].get_color() == 'red' else 'red'
-        opponent_second_base_line = 1 if opponent_color == 'blue' else 11
-
-        for x in range(self.board_rows):
-            for y in range(self.board_cols):
-                piece = self.env.get_piece_at_position((x, y))
-                if piece and piece.get_color() == opponent_color and piece.get_position() == (x, y):
-                    if x in [0, opponent_second_base_line]:
-                        self.belief[x, y, self.piece_types.index('地雷')] *= 1.5
-                    elif piece in self.stationary_pieces and self.stationary_pieces[piece] > 3:
-                        self.belief[x, y, self.piece_types.index('地雷')] *= 1.5
-                    self.belief[x, y, :] /= np.sum(self.belief[x, y, :])
-
-    def infer_opponent_pieces(self):
-        inferred_pieces = {}
-        opponent_color = 'blue' if self.env.red_pieces[0].get_color() == 'red' else 'red'
-        for x in range(self.board_rows):
-            for y in range(self.board_cols):
-                piece = self.env.get_piece_at_position((x, y))
-                if piece and piece.get_color() == opponent_color:
-                    piece_type_index = np.argmax(self.belief[x, y, :])
-                    piece_type = self.piece_types[piece_type_index]
-                    inferred_pieces[(x, y)] = piece_type
-        return inferred_pieces
-
-    def get_neighboring_positions(self, position):
-        x, y = position
-        neighbors = []
-        if x > 0:
-            neighbors.append((x - 1, y))
-        if x < self.board_rows - 1:
-            neighbors.append((x + 1, y))
-        if y > 0:
-            neighbors.append((x, y - 1))
-        if y < self.board_cols - 1:
-            neighbors.append((x, y + 1))
-        return neighbors
-
-    def is_valid_position(self, position):
-        x, y = position
-        return 0 <= x < self.board_rows and 0 <= y < self.board_cols
-
-    def get_flag_position(self, color):
-        return self.env.get_flag_position(color)
 
 class JunQiEnvGame(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -208,14 +51,33 @@ class JunQiEnvGame(gym.Env):
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.board_rows, self.board_cols, 3), dtype=np.float32)
         self.pi = None
         self.pi_reg = None
-        
+        self.initial_board = initial_board
         self.piece_types = list(piece_encoding.keys())
-        self.inference_model = InferenceModel(self.board_rows, self.board_cols, self.piece_types, self)  # 传递 env 对象
+
+        self.model = self.load_inference_model('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/infer_model.pth')
 
         self.move_history = []
         self.battle_history = []
+        self.red_commander_dead = False
+        self.blue_commander_dead = False
 
         self.reset()
+
+    def load_inference_model(self, model_path):
+        # 定义推理模型的架构和初始化
+        model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys()))
+        model.load_state_dict(torch.load(model_path))
+        model.eval()
+        
+        # 定义目标模型
+        target_model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys()))
+        target_model.load_state_dict(model.state_dict())
+        target_model.eval()
+        
+        # 创建 DQNAgent 实例
+        action_size = len(self.red_pieces) * self.board_rows * self.board_cols
+        agent = DQNAgentInfer(model=model, target_model=target_model, action_size=action_size, initial_board=self.initial_board)
+        return agent
 
     def reset(self):
         self.board = np.zeros((self.board_rows, self.board_cols))
@@ -231,9 +93,10 @@ class JunQiEnvGame(gym.Env):
                 self.occupied_positions_blue.add(position)
         self.state = 'play'
         self.turn = 0
-        self.inference_model = InferenceModel(self.board_rows, self.board_cols, self.piece_types, self)  # 传递 env 对象
         self.move_history = []
         self.battle_history = []
+        self.red_commander_dead = False
+        self.blue_commander_dead = False
         return self.get_state()
 
     def get_state(self):
@@ -250,10 +113,6 @@ class JunQiEnvGame(gym.Env):
                     state[x, y, 1] = 1
         return state
 
-    def get_state_size(self):
-        state = self.get_state()
-        return state.size 
-    
     def set_state(self, state):
         self.state = state
             
@@ -265,24 +124,18 @@ class JunQiEnvGame(gym.Env):
         initial_state = self.get_state()
         self.make_move(current_player_color, piece, target_position)
 
-        # 更新信念状态
-        observations = self.get_observation()
-        move_history = self.get_move_history()
-        battle_history = self.get_battle_history()
-        self.inference_model.update_belief(move_history, battle_history)
-
         # 其他逻辑
         next_state = self.get_state()
-        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg, player_color,weights)
+        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg, player_color, weights)
         if current_player_color == 'red' and self.check_winner(current_player_color) == 'red_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color,weights)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color, weights)
         elif current_player_color == 'blue' and self.check_winner(current_player_color) == 'blue_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color,weights)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color, weights)
         done = True  # 每次移动一个棋子后即结束
         info = {"invalid_move": reward < 0}
         return next_state, reward, done, info
 
-    def step_with_inference(self, action, pi, pi_reg, current_player_color,weights):
+    def step_with_inference(self, action, pi, pi_reg, current_player_color, weights):
         player_color, piece, target_position = self.decode_action(action)
         if piece.get_color() != current_player_color:
             logging.warning(f"Invalid action: In turn {self.turn}, it's {current_player_color}'s turn, but the piece is {piece.get_color()} {piece.get_name()}.")
@@ -290,7 +143,7 @@ class JunQiEnvGame(gym.Env):
         initial_state = self.get_state()
 
         # 使用推理模型来推测对手棋子的状态
-        inferred_pieces = self.inference_model.infer_opponent_pieces()
+        inferred_pieces = self.infer_opponent_pieces(current_player_color)
 
         # 创建环境副本并设置推测状态
         env_copy = copy.deepcopy(self)
@@ -307,45 +160,76 @@ class JunQiEnvGame(gym.Env):
 
         # 其他逻辑
         next_state = env_copy.get_state()
-        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg, player_color,weights)
+        reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'valid_move', pi, pi_reg, player_color, weights)
         if current_player_color == 'red' and self.check_winner(current_player_color) == 'red_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color,weights)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color, weights)
         elif current_player_color == 'blue' and self.check_winner(current_player_color) == 'blue_wins':
-            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color,weights)
+            reward = self.reward_model.get_reward(initial_state, (piece, target_position), 'win_game', pi, pi_reg, player_color, weights)
         done = True  # 每次移动一个棋子后即结束
         info = {"invalid_move": reward < 0}
         return next_state, reward, done, info
-    
-    def get_observation(self):
-        observations = {}
-        for piece in self.red_pieces + self.blue_pieces:
-            pos = piece.get_position()
-            if pos:
-                observations[pos] = piece.get_name()
-        return observations
 
-    def get_valid_actions(self, player_color):
-        valid_actions = []
-        current_pieces = None
-        if player_color == 'red':
-            current_pieces = self.red_pieces
-        else:
-            current_pieces = self.blue_pieces
+    def infer_opponent_pieces(self, current_player_color):
+        board_state = self.get_full_state()['board_state']
+        move_history = self.move_history
+        battle_history = self.battle_history
+        opponent_commander_dead = self.red_commander_dead if current_player_color == 'blue' else self.blue_commander_dead
 
-        base_positions = self.get_base_positions()  # 获取所有大本营位置
+        state = {
+            'board_state': board_state,
+            'move_history': move_history,
+            'battle_history': battle_history,
+            'agent_color': current_player_color,
+            'opponent_commander_dead': opponent_commander_dead
+        }
 
-        for piece_index, piece in enumerate(current_pieces):
-            position = piece.get_position()
-            if position and position not in base_positions:  # 检查棋子不在基地里
-                valid_moves = self.get_valid_moves(piece)
-                for move in valid_moves:
-                    action = self.encode_action(player_color, piece_index, move)
-                    valid_actions.append(action)
-        return valid_actions
+        # 确保 board_state 是 4 维的
+        if board_state.ndim == 3:
+            board_state = np.expand_dims(board_state, axis=0)
 
-    def get_pieces(self, player_color):
-        return self.red_pieces if player_color == 'red' else self.blue_pieces
+        # 转换为tensor输入并调整形状
+        input_tensor = torch.tensor(board_state, dtype=torch.float32).permute(0, 3, 1, 2)
+        output = self.model.model(input_tensor).detach().numpy()  # 调用模型的forward方法
 
+        inferred_pieces = {}
+        opponent_color = 'blue' if current_player_color == 'red' else 'red'
+
+        # 假设输出是每个棋子类别的概率分布
+        piece_types_prob = output[0]  # 形状为 (12,)
+        for x in range(self.board_rows):
+            for y in range(self.board_cols):
+                if board_state[0, x, y, 1] == 1:  # 检查这个位置是否有对方棋子
+                    piece_type_index = np.argmax(piece_types_prob)
+                    piece_type = self.piece_types[piece_type_index]
+                    inferred_pieces[(x, y)] = piece_type
+        return inferred_pieces
+
+    def get_full_state(self):
+        state = np.zeros((self.board_rows, self.board_cols, 4))
+        for piece in self.red_pieces:
+            if piece.position:
+                x, y = piece.position
+                if 0 <= x < self.board_rows and 0 <= y < self.board_cols:
+                    state[x, y, 0] = 1
+        for piece in self.blue_pieces:
+            if piece.position:
+                x, y = piece.position
+                if 0 <= x < self.board_rows and 0 <= y < self.board_cols:
+                    state[x, y, 1] = 1
+        if self.red_commander_dead:
+            state[:, :, 2] = 1  # 红方司令被消灭
+        if self.blue_commander_dead:
+            state[:, :, 2] = 2  # 蓝方司令被消灭
+        return {
+            'board_state': state,
+            'move_history': self.move_history,
+            'battle_history': self.battle_history,
+            'agent_color': 'red' if self.turn % 2 == 0 else 'blue'  # 假设轮流行动，红方先手
+        }
+
+    def set_state(self, state):
+        self.state = state
+            
     def make_move(self, player_color, piece, target_position):
         if player_color != piece.get_color():
             logging.warning(f"Invalid action: In turn {self.turn}, it's {player_color}'s turn, but the piece is {piece.get_color()} {piece.get_name()}.")
@@ -416,7 +300,7 @@ class JunQiEnvGame(gym.Env):
         if target_piece and target_piece.get_color() != piece.get_color():
             # 执行战斗
             battle_result = self.battle(piece, target_piece)
-            self.battle_history.append((piece, target_piece, battle_result))  # 记录战斗历史
+            self.battle_history.append((piece.get_color(), piece.get_name(), piece.get_position(), target_piece.get_color(), target_piece.get_name(), target_piece.get_position(), battle_result))  # 记录战斗历史
             if battle_result == 'win_battle':
                 target_piece.set_position(None)  # 移除被击败的棋子
             elif battle_result == 'lose_battle':
@@ -450,7 +334,7 @@ class JunQiEnvGame(gym.Env):
         if target_piece and target_piece.get_color() != piece.get_color():
             # 执行战斗
             battle_result = self.battle(piece, target_piece)
-            self.battle_history.append((piece, target_piece, battle_result))  # 记录战斗历史
+            self.battle_history.append((piece.get_color(), piece.get_name(), piece.get_position(), target_piece.get_color(), target_piece.get_name(), target_piece.get_position(), battle_result))  # 记录战斗历史
             if battle_result == 'win_battle':
                 target_piece.set_position(None)  # 移除被击败的棋子
             elif battle_result == 'lose_battle':
@@ -473,6 +357,7 @@ class JunQiEnvGame(gym.Env):
 
         piece.set_position(target_position)
         return True
+
     def get_valid_moves(self, piece):
         current_position = piece.get_position()
         valid_moves = set()
@@ -880,7 +765,7 @@ class JunQiEnvGame(gym.Env):
         target_position = (position_index // self.board_cols, position_index % self.board_cols)
         return player_color, piece, target_position
 
-    def check_winner(self,player_color):
+    def check_winner(self, player_color):
         """
         检查是否有玩家获胜。
         """
@@ -1045,7 +930,6 @@ class JunQiEnvGame(gym.Env):
     def get_battle_history(self):
         return self.battle_history
     
-    
     def visualize_full_board(self, last_move=None, battle_info=None):
         board_rows, board_cols = 13, 5
         fig, ax = plt.subplots(figsize=(8, 12))
@@ -1106,7 +990,7 @@ class JunQiEnvGame(gym.Env):
         plt.show()
         
     def visualize_inferred_board(self, player_color):
-        inferred_pieces = self.inference_model.infer_opponent_pieces()
+        inferred_pieces = self.infer_opponent_pieces(player_color)
         board_rows, board_cols = 13, 5
         
         # 创建一个大的图形，包含两个子图
@@ -1163,3 +1047,66 @@ class JunQiEnvGame(gym.Env):
     def get_action_space_size(self):
         return (len(self.red_pieces) + len(self.blue_pieces)) * (self.board_rows * self.board_cols)
 
+    def get_state_size(self):
+        return self.observation_space.shape[0] * self.observation_space.shape[1] * self.observation_space.shape[2]
+    
+    def get_valid_actions(self, player_color):
+        valid_actions = []
+        current_pieces = None
+        if player_color == 'red':
+            current_pieces = self.red_pieces
+        else:
+            current_pieces = self.blue_pieces
+
+        base_positions = self.get_base_positions()  # 获取所有大本营位置
+
+        for piece_index, piece in enumerate(current_pieces):
+            position = piece.get_position()
+            if position and position not in base_positions:  # 检查棋子不在基地里
+                valid_moves = self.get_valid_moves(piece)
+                for move in valid_moves:
+                    action = self.encode_action(player_color, piece_index, move)
+                    valid_actions.append(action)
+        return valid_actions
+
+    def prepare_input(self, board_state, move_history, battle_history, opponent_commander_dead, pos):
+        x, y = pos
+        input_data = np.zeros((4, self.model.board_rows, self.model.board_cols))
+        
+        if board_state.shape[2] > 0:
+            max_channel = np.argmax(board_state[x, y])
+            max_channel = min(max_channel, board_state.shape[2] - 1)
+            board_slice = board_state[:, :, max_channel]
+            
+            padded_slice = np.zeros((self.model.board_rows, self.model.board_cols))
+            rows = min(board_slice.shape[0], self.model.board_rows)
+            cols = min(board_slice.shape[1], self.model.board_cols)
+            
+            for i in range(rows):
+                for j in range(cols):
+                    if isinstance(board_slice[i, j], (list, np.ndarray)):
+                        padded_slice[i, j] = board_slice[i, j][0]
+                    else:
+                        padded_slice[i, j] = board_slice[i, j]
+            
+            input_data[0, :, :] = padded_slice
+        
+        # 处理 move_history
+        move_count = min(len(move_history), 10)
+        for idx, move in enumerate(move_history[-move_count:]):
+            piece, start_pos, end_pos = move
+            color_idx = 1 if piece.get_color() == 'red' else 2
+            input_data[color_idx, start_pos[0], start_pos[1]] = idx + 1
+            input_data[color_idx, end_pos[0], end_pos[1]] = idx + 1
+        
+        # 处理 battle_history
+        for battle in battle_history:
+            attacker_color, attacker_name, attacker_pos, defender_color, defender_name, defender_pos, result = battle
+            color_idx = 3 if attacker_color == 'red' else 2
+            input_data[color_idx, attacker_pos[0], attacker_pos[1]] = piece_encoding[attacker_name]
+            input_data[color_idx, defender_pos[0], defender_pos[1]] = piece_encoding[defender_name]
+        
+        if opponent_commander_dead:
+            input_data[3, :, :] = 1  # 标记对方司令已被消灭
+        
+        return input_data

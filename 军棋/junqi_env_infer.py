@@ -99,7 +99,7 @@ class JunQiEnvInfer(gym.Env):
         piece_positions_red = [(piece, piece.get_position()) for piece in self.red_pieces if piece.get_position()]
         piece_positions_blue = [(piece, piece.get_position()) for piece in self.blue_pieces if piece.get_position()]
 
-        for _ in range(1000):
+        for _ in range(2000):
             opponent_positions_blue_set = {pos for _, pos in piece_positions_blue}
             opponent_positions_red_set = {pos for _, pos in piece_positions_red}
 
@@ -112,11 +112,11 @@ class JunQiEnvInfer(gym.Env):
                             if new_pos == blue_pos:
                                 result = self.resolve_battle(piece, blue_piece)
                                 if result == 'win':
-                                    self.battle_history.append((piece.get_position(), blue_piece.get_position(), result))
+                                    self.battle_history.append((piece, new_pos, blue_piece, blue_pos, 'win'))
                                 elif result == 'draw':
-                                    self.battle_history.append((piece.get_position(), blue_piece.get_position(), 'draw'))
+                                    self.battle_history.append((piece, new_pos, blue_piece, blue_pos, 'draw'))
                                 elif result == 'lose':
-                                    self.battle_history.append((blue_piece.get_position(), piece.get_position(), 'win'))
+                                    self.battle_history.append((blue_piece, blue_pos, piece, new_pos, 'win'))
                                 piece_positions_red = [(p, p.get_position()) for p in self.red_pieces if p.get_position()]
                                 piece_positions_blue = [(p, p.get_position()) for p in self.blue_pieces if p.get_position()]
                                 break
@@ -130,11 +130,11 @@ class JunQiEnvInfer(gym.Env):
                             if new_pos == red_pos:
                                 result = self.resolve_battle(piece, red_piece)
                                 if result == 'win':
-                                    self.battle_history.append((piece.get_position(), red_piece.get_position(), result))
+                                    self.battle_history.append((piece, new_pos, red_piece, red_pos, 'win'))
                                 elif result == 'draw':
-                                    self.battle_history.append((piece.get_position(), red_piece.get_position(), 'draw'))
+                                    self.battle_history.append((piece, new_pos, red_piece, red_pos, 'draw'))
                                 elif result == 'lose':
-                                    self.battle_history.append((red_piece.get_position(), piece.get_position(), 'win'))
+                                    self.battle_history.append((red_piece, red_pos, piece, new_pos, 'win'))
                                 piece_positions_red = [(p, p.get_position()) for p in self.red_pieces if p.get_position()]
                                 piece_positions_blue = [(p, p.get_position()) for p in self.blue_pieces if p.get_position()]
                                 break
@@ -289,6 +289,9 @@ class JunQiEnvInfer(gym.Env):
             '军旗': 0
         }
 
+        inferred_counts = {piece: 0 for piece in piece_weights}
+        actual_counts = {piece: 0 for piece in piece_weights}
+
         def get_nearby_positions(pos):
             x, y = pos
             nearby_positions = [
@@ -298,8 +301,10 @@ class JunQiEnvInfer(gym.Env):
             return [(nx, ny) for nx, ny in nearby_positions if 0 <= nx < self.board_rows and 0 <= ny < self.board_cols]
 
         for pos, inferred_type in inferred_pieces.items():
+            inferred_counts[inferred_type] += 1
             if pos in actual_pieces:
                 actual_type = actual_pieces[pos]
+                actual_counts[actual_type] += 1
                 if inferred_type == actual_type:
                     reward += piece_weights.get(actual_type, 1)
                 elif inferred_type in piece_weights and actual_type in piece_weights:
@@ -310,7 +315,54 @@ class JunQiEnvInfer(gym.Env):
                 if nearby_pos in actual_pieces and inferred_type == actual_pieces[nearby_pos]:
                     reward += piece_weights.get(actual_pieces[nearby_pos], 1) / 2
 
+        # 惩罚过多推测同一个棋子类型
+        for piece_type, count in inferred_counts.items():
+            if count > 1 and piece_type == '司令':
+                reward -= 3 * (count - 1)  # 惩罚多次推测司令
+            elif count > 1:
+                reward -= 1 * (count - 1)  # 惩罚多次推测其他类型
+
+        # 奖励均匀分布的推测
+        inferred_piece_distribution = np.array(list(inferred_counts.values()))
+        uniformity_score = np.std(inferred_piece_distribution)
+        reward -= uniformity_score
+
+        # 按照军棋规则增加策略性奖励
+        for pos, inferred_type in inferred_pieces.items():
+            if inferred_type in ['司令', '军长']:
+                if self.is_in_camp(pos):
+                    reward += 1  # 奖励在行营中的高级棋子
+            if inferred_type in ['工兵']:
+                if self.is_railway(pos):
+                    reward += 0.5  # 奖励在铁路上的工兵
+
+            # 额外策略: 根据移动历史和战斗历史调整奖励
+            for move in self.move_history:
+                piece, start_pos, end_pos = move
+                if end_pos == pos:
+                    if inferred_type == '炸弹' and self.has_rich_battle_history(pos):
+                        reward += 2  # 奖励有丰富战斗历史的炸弹推测
+                    if inferred_type == '地雷' and self.is_in_last_two_rows(end_pos):
+                        reward += 1.5  # 奖励在最后两排的地雷推测
+
+            for battle in self.battle_history:
+                attacker_piece, attacker_pos, defender_piece, defender_pos, result = battle
+                if defender_pos == pos and result == 'win':
+                    if inferred_type in piece_weights:
+                        reward += piece_weights[inferred_type] * 0.5  # 奖励根据战斗历史的推测
+
         return reward
+
+    def has_rich_battle_history(self, pos):
+        # 判断该位置是否有丰富的战斗历史
+        battle_count = sum(1 for battle in self.battle_history if battle[1] == pos or battle[3] == pos)
+        return battle_count > 2
+
+    def is_in_last_two_rows(self, pos):
+        # 判断该位置是否在最后两排
+        x, _ = pos
+        return x in [0, 1, 11, 12]
+
 
     def get_actual_pieces(self):
         actual_pieces = {}
@@ -321,7 +373,7 @@ class JunQiEnvInfer(gym.Env):
         return actual_pieces
 
     def is_terminal_state(self):
-        max_turns = 10
+        max_turns = 2
         if self.turn >= max_turns:
             return True
         return False
@@ -593,3 +645,9 @@ class JunQiEnvInfer(gym.Env):
 
     def get_camps(self):
         return [(2, 1), (2, 3), (4, 1), (4, 3), (8, 1), (8, 3), (10, 1), (10, 3), (3, 2), (9, 2)]
+    def is_in_camp(self, position):
+        """
+        检查位置是否在行营中。
+        """
+        camps = self.get_camps()
+        return position in camps

@@ -4,6 +4,28 @@ import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 import random
+from junqi_env_infer import JunQiEnvInfer
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels)
+            )
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        out = F.relu(out)
+        return out
 
 class DoubleDQN(nn.Module):
     def __init__(self, board_rows, board_cols, piece_types):
@@ -12,28 +34,30 @@ class DoubleDQN(nn.Module):
         self.board_cols = board_cols
         self.piece_types = piece_types
 
-        self.conv1 = nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
-        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)
+        self.conv1 = nn.Conv2d(4, 128, kernel_size=3, stride=1, padding=1)
+        self.res_block1 = ResidualBlock(128, 128)
+        self.res_block2 = ResidualBlock(128, 256)
+        self.res_block3 = ResidualBlock(256, 512)
 
         temp_input = torch.zeros(1, 4, board_rows, board_cols)
         temp_output = self._forward_conv(temp_input)
-        conv_output_size = temp_output.view(1, -1).size(1)
-        
-        self.fc1 = nn.Linear(conv_output_size, 1024)
-        self.fc2 = nn.Linear(1024, 512)
-        self.fc3 = nn.Linear(512, len(piece_types))
+        conv_output_size = temp_output.reshape(1, -1).size(1)
+
+        self.fc1 = nn.Linear(conv_output_size, 2048)
+        self.fc2 = nn.Linear(2048, 1024)
+        self.fc3 = nn.Linear(1024, len(piece_types))
 
     def _forward_conv(self, x):
         x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
+        x = self.res_block1(x)
+        x = self.res_block2(x)
+        x = self.res_block3(x)
         return x
 
     def forward(self, x):
         x = self._forward_conv(x)
-        
-        x = x.view(x.size(0), -1)
+
+        x = x.reshape(x.size(0), -1)
         expected_size = self.fc1.in_features
         actual_size = x.size(1)
         if actual_size < expected_size:
@@ -41,14 +65,13 @@ class DoubleDQN(nn.Module):
             x = torch.cat((x, padding), dim=1)
         elif actual_size > expected_size:
             x = x[:, :expected_size]
-        
+
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
-
 class DQNAgent:
-    def __init__(self, model, target_model, action_size, memory_capacity=10000, learning_rate=0.001, gamma=0.95, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
+    def __init__(self, model, target_model, action_size, initial_board, memory_capacity=10000, learning_rate=0.001, gamma=0.95, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
         self.model = model
         self.target_model = target_model
         self.action_size = action_size
@@ -61,14 +84,24 @@ class DQNAgent:
         self.memory = Memory(memory_capacity)
         self.batch_size = 64
         self.update_target_model()
+        self.pre_fill_memory(initial_board)
 
     def update_target_model(self):
         self.target_model.load_state_dict(self.model.state_dict())
 
     def remember(self, state, action, reward, next_state, done):
         self.memory.store((state, action, reward, next_state, done))
-                
-    def act(self, state):
+
+    def pre_fill_memory(self, initial_board):
+        env = JunQiEnvInfer(initial_board=initial_board)
+        state = env.reset()
+        for _ in range(self.memory.capacity // 10):
+            action = env.action_space.sample()
+            next_state, reward, done, _ = env.step(action)
+            self.remember(state, action, reward, next_state, done)
+            state = next_state if not done else env.reset()
+            
+    def act(self, state):    
         board_state = state['board_state']
         move_history = state['move_history']
         battle_history = state['battle_history']
@@ -78,12 +111,16 @@ class DQNAgent:
         opponent_color = 'blue' if agent_color == 'red' else 'red'
 
         # 提取对方棋子的位置
-        opponent_positions = [(x, y) for x in range(board_state.shape[2]) for y in range(board_state.shape[3]) if np.any(board_state[0, :, x, y] != 0)]
+        opponent_positions = []
+        for x in range(self.model.board_rows):
+            for y in range(self.model.board_cols):
+                if np.any(board_state[x, y, :len(self.model.piece_types)] != 0):
+                    opponent_positions.append((x, y))
 
         # 根据对方棋子的位置创建矩阵，推断对方棋子的可能类型
         inferred_pieces = {}
         for pos in opponent_positions:
-            input_data = self.prepare_input(board_state[0], move_history, battle_history,opponent_commander_dead, pos)
+            input_data = self.prepare_input(board_state, move_history, battle_history, opponent_commander_dead, pos)
             input_tensor = torch.tensor(input_data, dtype=torch.float32).unsqueeze(0)
             output = self.model(input_tensor).detach().numpy()
             piece_type_idx = np.argmax(output)
@@ -105,76 +142,61 @@ class DQNAgent:
 
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size), inferred_pieces
+
         state_tensor = torch.tensor(board_state, dtype=torch.float32)
 
-        # 确保 state_tensor 的形状是 [1, 4, board_rows, board_cols]
-        if state_tensor.shape[1] != 4:
-            if state_tensor.shape[1] > 4:
-                state_tensor = state_tensor[:, :4, :, :]
-            else:
-                padding = (0, 0, 0, 0, 0, 4 - state_tensor.shape[1])
-                state_tensor = F.pad(state_tensor, padding)
+        # 确保 state_tensor 的形状是 [1, board_rows, board_cols, len(piece_types) + 1]
+        if state_tensor.shape != torch.Size([1, self.model.board_rows, self.model.board_cols, len(self.model.piece_types) + 1]):
+            # 强制调整形状
+            state_tensor = state_tensor.view(1, self.model.board_rows, self.model.board_cols, len(self.model.piece_types) + 1)
 
         act_values = self.model(state_tensor)
         return torch.argmax(act_values[0]).item(), inferred_pieces
 
+
     def prepare_input(self, board_state, move_history, battle_history, opponent_commander_dead, pos):
         x, y = pos
         input_data = np.zeros((4, self.model.board_rows, self.model.board_cols))
-        
-        if board_state.shape[2] > 0:
-            max_channel = np.argmax(board_state[x, y])
-            max_channel = min(max_channel, board_state.shape[2] - 1)
-            board_slice = board_state[:, :, max_channel]
-            
-            padded_slice = np.zeros((self.model.board_rows, self.model.board_cols))
-            rows = min(board_slice.shape[0], self.model.board_rows)
-            cols = min(board_slice.shape[1], self.model.board_cols)
-            
-            for i in range(rows):
-                for j in range(cols):
-                    if isinstance(board_slice[i, j], (list, np.ndarray)):
-                        padded_slice[i, j] = board_slice[i, j][0]
-                    else:
-                        padded_slice[i, j] = board_slice[i, j]
-            
-            input_data[0] = padded_slice
-        else:
-            temp_data = np.zeros((self.model.board_rows, self.model.board_cols))
-            for c in range(board_state.shape[2]):
-                temp_data += board_state[:, :, c]
-            if board_state.shape[2] < 4:
-                temp_data = np.pad(temp_data, ((0, 0), (0, 4 - board_state.shape[2])), mode='constant', constant_values=0)
-            input_data[0] = temp_data
 
+        input_data[0] = board_state[:, :, :len(self.model.piece_types)].sum(axis=2)
+
+        # 记录自己的移动历史
         for move in move_history:
             start_pos, _, end_pos = move
             if end_pos == pos:
                 input_data[1, start_pos[0], start_pos[1]] += 1
 
+        # 更新战斗历史以排除不可能的棋子类型
         for battle in battle_history:
-            attacker_pos, defender_pos, _ = battle
+            attacker_piece, attacker_pos, defender_piece, defender_pos, result = battle
             if defender_pos == pos:
-                input_data[2, attacker_pos[0], attacker_pos[1]] += 1
+                if result == 'win':
+                    input_data[2, attacker_pos[0], attacker_pos[1]] += 1
+                elif result == 'lose':
+                    input_data[2, attacker_pos[0], attacker_pos[1]] -= 1
+
+        # 检查是否有可能的炸弹或地雷
+        if self.is_possible_bomb(battle_history, pos):
+            input_data[3, x, y] = 1  # 标记为可能的炸弹
+        elif self.is_possible_mine(move_history, pos):
+            input_data[3, x, y] = 2  # 标记为可能的地雷
 
         if opponent_commander_dead:
             input_data[3, :, :] = 1
 
         return input_data
 
-    def is_commander_position(self, position, color):
-        if color == 'red':
-            return position in [(0, 1), (0, 3)]
-        elif color == 'blue':
-            return position in [(12, 1), (12, 3)]
-        return False
+    def is_possible_bomb(self, battle_history, pos):
+        # 如果一个棋子周围有很多战斗历史记录，那么这个棋子可能是炸弹
+        battle_count = sum(1 for battle in battle_history if battle[3] == pos or battle[1] == pos)
+        return battle_count > 3  # 可根据需要调整阈值
 
-    def get_flag_position(self, color):
-        if color == 'red':
-            return (0, 1)
-        elif color == 'blue':
-            return (12, 1)
-        return None
+    def is_possible_mine(self, move_history, pos):
+        # 如果一个棋子位于后两排且没有移动历史记录，那么这个棋子可能是地雷
+        if pos[0] >= self.model.board_rows - 2:
+            move_count = sum(1 for move in move_history if move[2] == pos)
+            return move_count == 0
+        return False
 
     def replay(self):
         if len(self.memory) < self.batch_size:
@@ -216,7 +238,7 @@ class DQNAgent:
 
     def save(self, name):
         torch.save(self.model.state_dict(), name)
-                
+
     def get_board_state(self, state_dict):
         board_state = state_dict['board_state']
         
@@ -334,6 +356,6 @@ class Memory:
         ps = np.power(clipped_errors, self.alpha)
         for ti, p in zip(tree_idx, ps):
             self.tree.update(ti, p)
-            
+
     def __len__(self):
         return self.tree.n_entries
