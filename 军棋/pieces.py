@@ -23,3 +23,9 @@ class Piece:
 
     def get_valid_positions(self):
         return self.valid_positions
+    
+    def is_revealed(self):
+        return self.revealed
+    
+    def set_revealed(self, revealed):
+        self.revealed = revealed

@@ -5,8 +5,6 @@ import torch.nn.functional as F
 import numpy as np
 import random
 
-
-
 class DoubleDQN(nn.Module):
     def __init__(self, board_rows, board_cols, piece_types):
         super(DoubleDQN, self).__init__()
@@ -14,12 +12,11 @@ class DoubleDQN(nn.Module):
         self.board_cols = board_cols
         self.piece_types = piece_types
 
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
+        self.conv1 = nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1)
         self.conv2 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
         self.conv3 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)
 
-        # 初始化一个小的输入，计算卷积层的输出大小
-        temp_input = torch.zeros(1, 3, board_rows, board_cols)
+        temp_input = torch.zeros(1, 4, board_rows, board_cols)
         temp_output = self._forward_conv(temp_input)
         conv_output_size = temp_output.view(1, -1).size(1)
         
@@ -36,12 +33,6 @@ class DoubleDQN(nn.Module):
     def forward(self, x):
         x = self._forward_conv(x)
         
-        # # 打印调试信息
-        # print(f'After conv1: {x.shape}')
-        # print(f'After conv2: {x.shape}')
-        # print(f'After conv3: {x.shape}')
-        
-        # 动态调整全连接层的输入大小
         x = x.view(x.size(0), -1)
         expected_size = self.fc1.in_features
         actual_size = x.size(1)
@@ -51,12 +42,11 @@ class DoubleDQN(nn.Module):
         elif actual_size > expected_size:
             x = x[:, :expected_size]
         
-        # print(f'After view: {x.shape}')  # 添加调试信息
-        
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
+
 class DQNAgent:
     def __init__(self, model, target_model, action_size, memory_capacity=10000, learning_rate=0.001, gamma=0.95, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
         self.model = model
@@ -83,16 +73,17 @@ class DQNAgent:
         move_history = state['move_history']
         battle_history = state['battle_history']
         agent_color = state['agent_color']
+        opponent_commander_dead = state['opponent_commander_dead']
 
         opponent_color = 'blue' if agent_color == 'red' else 'red'
 
         # 提取对方棋子的位置
-        opponent_positions = [(x, y) for x in range(board_state.shape[1]) for y in range(board_state.shape[2]) if np.any(board_state[0, x, y] != 0)]
+        opponent_positions = [(x, y) for x in range(board_state.shape[2]) for y in range(board_state.shape[3]) if np.any(board_state[0, :, x, y] != 0)]
 
         # 根据对方棋子的位置创建矩阵，推断对方棋子的可能类型
         inferred_pieces = {}
         for pos in opponent_positions:
-            input_data = self.prepare_input(board_state[0], move_history, battle_history, pos)
+            input_data = self.prepare_input(board_state[0], move_history, battle_history,opponent_commander_dead, pos)
             input_tensor = torch.tensor(input_data, dtype=torch.float32).unsqueeze(0)
             output = self.model(input_tensor).detach().numpy()
             piece_type_idx = np.argmax(output)
@@ -103,51 +94,57 @@ class DQNAgent:
 
             inferred_pieces[pos] = self.model.piece_types[piece_type_idx]
 
+        if opponent_commander_dead:
+            # 明确军旗的位置
+            if opponent_color == 'red':
+                flag_positions = [(12, 1), (12, 3)]
+            else:
+                flag_positions = [(0, 1), (0, 3)]
+            for flag_pos in flag_positions:
+                inferred_pieces[flag_pos] = '军旗'
+
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size), inferred_pieces
         state_tensor = torch.tensor(board_state, dtype=torch.float32)
-        
-        # 确保 state_tensor 的形状是 [1, 3, board_rows, board_cols]
-        if state_tensor.shape[1] != 3:
-            if state_tensor.shape[1] > 3:
-                state_tensor = state_tensor[:, :3, :, :]
+
+        # 确保 state_tensor 的形状是 [1, 4, board_rows, board_cols]
+        if state_tensor.shape[1] != 4:
+            if state_tensor.shape[1] > 4:
+                state_tensor = state_tensor[:, :4, :, :]
             else:
-                padding = (0, 0, 0, 0, 0, 3 - state_tensor.shape[1])
+                padding = (0, 0, 0, 0, 0, 4 - state_tensor.shape[1])
                 state_tensor = F.pad(state_tensor, padding)
 
         act_values = self.model(state_tensor)
         return torch.argmax(act_values[0]).item(), inferred_pieces
 
-    def prepare_input(self, board_state, move_history, battle_history, pos):
+    def prepare_input(self, board_state, move_history, battle_history, opponent_commander_dead, pos):
         x, y = pos
-        input_data = np.zeros((3, self.model.board_rows, self.model.board_cols))
+        input_data = np.zeros((4, self.model.board_rows, self.model.board_cols))
         
         if board_state.shape[2] > 0:
             max_channel = np.argmax(board_state[x, y])
-            max_channel = min(max_channel, board_state.shape[2] - 1)  # 确保 max_channel 在有效范围内
+            max_channel = min(max_channel, board_state.shape[2] - 1)
             board_slice = board_state[:, :, max_channel]
             
-            # 确保 board_slice 的形状与 input_data[0] 一致
             padded_slice = np.zeros((self.model.board_rows, self.model.board_cols))
             rows = min(board_slice.shape[0], self.model.board_rows)
             cols = min(board_slice.shape[1], self.model.board_cols)
             
-            # 确保填充或修剪的形状正确
             for i in range(rows):
                 for j in range(cols):
                     if isinstance(board_slice[i, j], (list, np.ndarray)):
-                        padded_slice[i, j] = board_slice[i, j][0]  # 取序列中的第一个元素
+                        padded_slice[i, j] = board_slice[i, j][0]
                     else:
                         padded_slice[i, j] = board_slice[i, j]
             
             input_data[0] = padded_slice
         else:
-            # 如果 board_state 的通道数不足，创建一个包含所有通道数据的统一表示
             temp_data = np.zeros((self.model.board_rows, self.model.board_cols))
             for c in range(board_state.shape[2]):
                 temp_data += board_state[:, :, c]
-            if board_state.shape[2] < 3:
-                temp_data = np.pad(temp_data, ((0, 0), (0, 3 - board_state.shape[2])), mode='constant', constant_values=0)
+            if board_state.shape[2] < 4:
+                temp_data = np.pad(temp_data, ((0, 0), (0, 4 - board_state.shape[2])), mode='constant', constant_values=0)
             input_data[0] = temp_data
 
         for move in move_history:
@@ -160,7 +157,24 @@ class DQNAgent:
             if defender_pos == pos:
                 input_data[2, attacker_pos[0], attacker_pos[1]] += 1
 
+        if opponent_commander_dead:
+            input_data[3, :, :] = 1
+
         return input_data
+
+    def is_commander_position(self, position, color):
+        if color == 'red':
+            return position in [(0, 1), (0, 3)]
+        elif color == 'blue':
+            return position in [(12, 1), (12, 3)]
+        return False
+
+    def get_flag_position(self, color):
+        if color == 'red':
+            return (0, 1)
+        elif color == 'blue':
+            return (12, 1)
+        return None
 
     def replay(self):
         if len(self.memory) < self.batch_size:
@@ -178,7 +192,6 @@ class DQNAgent:
         rewards = torch.tensor(rewards, dtype=torch.float32)
         dones = torch.tensor(dones, dtype=torch.float32)
 
-        # 确保动作索引在有效范围内
         actions = torch.clamp(actions, 0, self.model.fc3.out_features - 1)
 
         q_values = self.model(states).gather(1, actions.unsqueeze(-1)).squeeze(-1)
@@ -207,28 +220,25 @@ class DQNAgent:
     def get_board_state(self, state_dict):
         board_state = state_dict['board_state']
         
-        # 如果 board_state 是四维的 (batch_size, channels, rows, cols)，我们去掉 batch_size 维度
         if len(board_state.shape) == 4 and board_state.shape[0] == 1:
             board_state = board_state[0]
         
-        # 确保 board_state 是一个三维数组
         if len(board_state.shape) != 3:
             raise ValueError(f"Expected board_state to be a 3D array, but got shape: {board_state.shape}")
         
         transposed_state = np.transpose(board_state, (2, 0, 1))
         
-        # 强制调整通道数为3
-        if transposed_state.shape[0] > 3:
-            transposed_state = transposed_state[:3, :, :]
-        elif transposed_state.shape[0] < 3:
-            padded_state = np.zeros((3, transposed_state.shape[1], transposed_state.shape[2]))
+        if transposed_state.shape[0] > 4:
+            transposed_state = transposed_state[:4, :, :]
+        elif transposed_state.shape[0] < 4:
+            padded_state = np.zeros((4, transposed_state.shape[1], transposed_state.shape[2]))
             padded_state[:transposed_state.shape[0], :, :] = transposed_state
             transposed_state = padded_state
             
         return transposed_state
 
-
 import numpy as np
+
 class SumTree:
     def __init__(self, capacity):
         self.capacity = capacity

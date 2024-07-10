@@ -23,6 +23,7 @@ piece_encoding = {
     '工兵': 11,
     '军旗': 12,
 }
+
 env = JunQiEnvSetUp()
 state_size = env.observation_space.shape[0] * env.observation_space.shape[1] * env.observation_space.shape[2]
 action_size = env.get_action_space_size()
@@ -64,6 +65,7 @@ env_infer = JunQiEnvInfer(initial_board)
 model = DoubleDQN(env_infer.board_rows, env_infer.board_cols, env_infer.piece_types)
 target_model = DoubleDQN(env_infer.board_rows, env_infer.board_cols, env_infer.piece_types)
 agent_infer = DQNAgent(model, target_model, action_size)
+
 def train_agent(env, agent, episodes=1000):
     rewards = []
     losses = []
@@ -81,7 +83,13 @@ def train_agent(env, agent, episodes=1000):
             padded_state = np.zeros((1, channels, height, width))
             padded_state[0, :channels, :height, :width] = transposed_state
 
-            state = {'board_state': padded_state, 'move_history': state_dict['move_history'], 'battle_history': state_dict['battle_history'], 'agent_color': 'red'}
+            state = {
+                'board_state': padded_state, 
+                'move_history': state_dict['move_history'], 
+                'battle_history': state_dict['battle_history'], 
+                'agent_color': 'red', 
+                'opponent_commander_dead': state_dict['opponent_commander_dead']
+            }
 
             done = False
             total_reward = 0
@@ -99,7 +107,13 @@ def train_agent(env, agent, episodes=1000):
                 next_padded_state = np.zeros((1, next_channels, next_height, next_width))
                 next_padded_state[0, :next_channels, :next_height, :next_width] = next_transposed_state
 
-                next_state = {'board_state': next_padded_state, 'move_history': next_state_dict['move_history'], 'battle_history': next_state_dict['battle_history'], 'agent_color': 'red'}
+                next_state = {
+                    'board_state': next_padded_state, 
+                    'move_history': next_state_dict['move_history'], 
+                    'battle_history': next_state_dict['battle_history'], 
+                    'agent_color': 'red', 
+                    'opponent_commander_dead': next_state_dict['opponent_commander_dead']
+                }
 
                 agent.remember(state, action, reward, next_state, done)
                 state = next_state

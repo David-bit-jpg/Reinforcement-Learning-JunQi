@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 from reward_model_infer import RewardModel
 from pieces import Piece
+
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
 
@@ -40,10 +41,12 @@ class JunQiEnvInfer(gym.Env):
         self.reward_model = RewardModel(self.piece_types)
         self.red_pieces, self.blue_pieces = self.create_pieces(initial_board)
         self.action_space = spaces.Discrete(len(self.piece_types) * self.board_rows * self.board_cols)
-        self.observation_space = spaces.Box(low=0, high=1, shape=(self.board_rows, self.board_cols, len(self.piece_types)), dtype=np.float32)
+        self.observation_space = spaces.Box(low=0, high=1, shape=(self.board_rows, self.board_cols, len(self.piece_types) + 1), dtype=np.float32)
         self.move_history = []
         self.battle_history = []
         self.turn = 0
+        self.red_commander_dead = False
+        self.blue_commander_dead = False
 
         self.reset()
 
@@ -63,6 +66,8 @@ class JunQiEnvInfer(gym.Env):
         self.turn = 0
         self.move_history = []
         self.battle_history = []
+        self.red_commander_dead = False
+        self.blue_commander_dead = False
         self.generate_random_histories()
         return self.get_state()
     
@@ -72,7 +77,6 @@ class JunQiEnvInfer(gym.Env):
             valid_moves = self.get_valid_moves(piece)
             opponent_positions_set = {pos for _, pos in opponent_positions}
 
-            # 优先选择包含对方棋子的有效位置
             battle_moves = [move for move in valid_moves if move in opponent_positions_set]
             if battle_moves:
                 new_pos = random.choice(battle_moves)
@@ -80,7 +84,7 @@ class JunQiEnvInfer(gym.Env):
                 new_pos = random.choice(valid_moves) if valid_moves else None
 
             if new_pos:
-                self.move_history.append((pos, piece, new_pos))  # 存储的是位置元组
+                self.move_history.append((pos, piece, new_pos))
                 piece.set_position(new_pos)
                 return new_pos
             return None
@@ -95,17 +99,15 @@ class JunQiEnvInfer(gym.Env):
         piece_positions_red = [(piece, piece.get_position()) for piece in self.red_pieces if piece.get_position()]
         piece_positions_blue = [(piece, piece.get_position()) for piece in self.blue_pieces if piece.get_position()]
 
-        for _ in range(1000):  # 模拟 1000 步
+        for _ in range(1000):
             opponent_positions_blue_set = {pos for _, pos in piece_positions_blue}
             opponent_positions_red_set = {pos for _, pos in piece_positions_red}
 
-            # 选择红方棋子并移动
             if piece_positions_red:
                 piece = select_piece_with_battle(piece_positions_red, opponent_positions_blue_set)
                 if piece:
                     new_pos = move_and_battle(piece, self.red_pieces, piece_positions_blue)
                     if new_pos:
-                        # 检查是否有碰撞并记录战斗
                         for blue_piece, blue_pos in piece_positions_blue:
                             if new_pos == blue_pos:
                                 result = self.resolve_battle(piece, blue_piece)
@@ -117,15 +119,13 @@ class JunQiEnvInfer(gym.Env):
                                     self.battle_history.append((blue_piece.get_position(), piece.get_position(), 'win'))
                                 piece_positions_red = [(p, p.get_position()) for p in self.red_pieces if p.get_position()]
                                 piece_positions_blue = [(p, p.get_position()) for p in self.blue_pieces if p.get_position()]
-                                break  # 立即跳出，避免重复检查
+                                break
 
-            # 选择蓝方棋子并移动
             if piece_positions_blue:
                 piece = select_piece_with_battle(piece_positions_blue, opponent_positions_red_set)
                 if piece:
                     new_pos = move_and_battle(piece, self.blue_pieces, piece_positions_red)
                     if new_pos:
-                        # 检查是否有碰撞并记录战斗
                         for red_piece, red_pos in piece_positions_red:
                             if new_pos == red_pos:
                                 result = self.resolve_battle(piece, red_piece)
@@ -137,12 +137,9 @@ class JunQiEnvInfer(gym.Env):
                                     self.battle_history.append((red_piece.get_position(), piece.get_position(), 'win'))
                                 piece_positions_red = [(p, p.get_position()) for p in self.red_pieces if p.get_position()]
                                 piece_positions_blue = [(p, p.get_position()) for p in self.blue_pieces if p.get_position()]
-                                break  # 立即跳出，避免重复检查
+                                break
 
     def piece_name_to_value(self, piece_name):
-        """
-        Converts a piece name to its corresponding value.
-        """
         value_map = {
             '地雷': 1,
             '炸弹': 2,
@@ -180,12 +177,32 @@ class JunQiEnvInfer(gym.Env):
             defender.set_position(None)
             return 'win'
         if piece_value < target_value:
+            if defender.get_name() == '司令':
+                if defender.get_color() == 'red':
+                    self.red_commander_dead = True
+                else:
+                    self.blue_commander_dead = True
             defender.set_position(None)
             return 'win'
         if piece_value > target_value:
+            if attacker.get_name() == '司令':
+                if attacker.get_color() == 'red':
+                    self.red_commander_dead = True
+                else:
+                    self.blue_commander_dead = True
             attacker.set_position(None)
             return 'lose'
         if piece_value == target_value:
+            if attacker.get_name() == '司令':
+                if attacker.get_color() == 'red':
+                    self.red_commander_dead = True
+                else:
+                    self.blue_commander_dead = True
+            if defender.get_name() == '司令':
+                if defender.get_color() == 'red':
+                    self.red_commander_dead = True
+                else:
+                    self.blue_commander_dead = True
             attacker.set_position(None)
             defender.set_position(None)
             return 'draw'
@@ -197,40 +214,43 @@ class JunQiEnvInfer(gym.Env):
         if not current_position or piece.get_name() in ['军旗', '地雷']:
             return list(valid_moves)
         
-        # 考虑铁路上的移动
         if self.is_railway(current_position):
             if piece.get_name() == '工兵':
                 valid_moves.update(self.get_railway_moves_for_worker(current_position, piece))
             else:
                 valid_moves.update(self.get_railway_moves(current_position, piece))
 
-        # 考虑道路上的移动
         valid_moves.update(self.get_road_moves(current_position, piece))
 
-        # 移除被占据的行营位置
         camps = self.get_camps()
         occupied_camps = set(camps) & (self.occupied_positions_red | self.occupied_positions_blue)
         valid_moves = [move for move in valid_moves if move not in occupied_camps]
 
-        # 移除被友方棋子占据的位置
         valid_moves = [move for move in valid_moves if not self.is_friendly_occupied(move, piece.get_color())]
 
         return list(valid_moves)
 
     def get_state(self):
-        state = np.zeros((self.board_rows, self.board_cols, len(self.piece_types)))
+        state = np.zeros((self.board_rows, self.board_cols, len(self.piece_types) + 1))
         for piece in self.red_pieces + self.blue_pieces:
             if piece.position:
                 x, y = piece.position
                 if 0 <= x < self.board_rows and 0 <= y < self.board_cols:
                     piece_index = self.piece_types.index(piece.get_name())
                     state[x, y, piece_index] = 1
+        if self.red_commander_dead:
+            state[:, :, -1] = 1  # 红方司令被消灭
+        if self.blue_commander_dead:
+            state[:, :, -1] = 2  # 蓝方司令被消灭
+
         return {
             'board_state': state,
             'move_history': self.move_history,
             'battle_history': self.battle_history,
-            'agent_color': 'red' if self.turn % 2 == 0 else 'blue'  # 假设轮流行动，红方先手
+            'agent_color': 'red' if self.turn % 2 == 0 else 'blue',
+            'opponent_commander_dead': self.blue_commander_dead if self.turn % 2 == 0 else self.red_commander_dead  # 添加这个字段
         }
+
 
     def step(self, action):
         inferred_pieces = self.decode_action(action)  # 将整数动作解码为推理结果
@@ -238,14 +258,22 @@ class JunQiEnvInfer(gym.Env):
         done = self.is_terminal_state()
         info = {}
         self.turn += 1  # 更新回合数
-        return self.get_state(), reward, done, info
 
+        if self.red_commander_dead:
+            for piece in self.blue_pieces:
+                if piece.get_name() == '军旗':
+                    piece.set_revealed(True)
+        if self.blue_commander_dead:
+            for piece in self.red_pieces:
+                if piece.get_name() == '军旗':
+                    piece.set_revealed(True)
+
+        return self.get_state(), reward, done, info
 
     def calculate_reward(self, inferred_pieces):
         actual_pieces = self.get_actual_pieces()
         reward = 0
 
-        # 定义不同棋子的权重
         piece_weights = {
             '司令': 5,
             '军长': 4,
@@ -261,7 +289,6 @@ class JunQiEnvInfer(gym.Env):
             '军旗': 0
         }
 
-        # 获取棋子周围位置的辅助函数
         def get_nearby_positions(pos):
             x, y = pos
             nearby_positions = [
@@ -278,11 +305,10 @@ class JunQiEnvInfer(gym.Env):
                 elif inferred_type in piece_weights and actual_type in piece_weights:
                     reward += piece_weights[actual_type] - piece_weights[inferred_type]
 
-            # 邻近位置奖励
             nearby_positions = get_nearby_positions(pos)
             for nearby_pos in nearby_positions:
                 if nearby_pos in actual_pieces and inferred_type == actual_pieces[nearby_pos]:
-                    reward += piece_weights.get(actual_pieces[nearby_pos], 1) / 2  # 邻近位置奖励减半
+                    reward += piece_weights.get(actual_pieces[nearby_pos], 1) / 2
 
         return reward
 
@@ -295,12 +321,10 @@ class JunQiEnvInfer(gym.Env):
         return actual_pieces
 
     def is_terminal_state(self):
-        # 达到特定回合数时结束游戏
-        max_turns = 10  # 设置最大回合数
+        max_turns = 10
         if self.turn >= max_turns:
             return True
         return False
-
 
     def create_pieces(self, initial_board):
         red_pieces = initial_board[0] if initial_board else self.generate_random_pieces('red')
@@ -425,7 +449,7 @@ class JunQiEnvInfer(gym.Env):
         total_positions = self.board_rows * self.board_cols
         piece_index = action // total_positions
         position_index = action % total_positions
-        piece_index = piece_index % len(self.piece_types)  # 确保piece_index在有效范围内
+        piece_index = piece_index % len(self.piece_types)
         piece_type = self.piece_types[piece_index]
         x = position_index // self.board_cols
         y = position_index % self.board_cols
@@ -525,20 +549,18 @@ class JunQiEnvInfer(gym.Env):
         for i in range(13):
             for j in range(5):
                 neighbors = []
-                if i != 6:  # 跳过第6行
-                    if i > 0 and i - 1 != 6:  # 确保上方的邻居不是第6行
+                if i != 6:
+                    if i > 0 and i - 1 != 6:
                         neighbors.append((i - 1, j))
-                    if i < 12 and i + 1 != 6:  # 确保下方的邻居不是第6行
+                    if i < 12 and i + 1 != 6:
                         neighbors.append((i + 1, j))
-                if j > 0 and i != 6:  # 确保当前行不是第6行
+                if j > 0 and i != 6:
                     neighbors.append((i, j - 1))
-                if j < 4 and i != 6:  # 确保当前行不是第6行
+                if j < 4 and i != 6:
                     neighbors.append((i, j + 1))
                 roads[(i, j)] = neighbors
 
-        # 添加对角路径
         diagonal_paths = [
-            # 左侧对角
             ((2, 1), (1, 0)), ((2, 1), (3, 0)), 
             ((2, 3), (1, 4)), ((2, 3), (3, 4)), 
             ((4, 1), (3, 0)), ((4, 1), (5, 0)), 
@@ -548,7 +570,6 @@ class JunQiEnvInfer(gym.Env):
             ((10, 1), (9, 0)), ((10, 1), (11, 0)), 
             ((10, 3), (9, 4)), ((10, 3), (11, 4)),
 
-            # 右侧对角
             ((2, 1), (1, 2)), ((2, 1), (3, 2)), 
             ((2, 3), (1, 2)), ((2, 3), (3, 2)), 
             ((4, 1), (3, 2)), ((4, 1), (5, 2)), 
