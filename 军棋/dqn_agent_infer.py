@@ -101,7 +101,7 @@ class DQNAgent:
             self.remember(state, action, reward, next_state, done)
             state = next_state if not done else env.reset()
             
-    def act(self, state):    
+    def act(self, state):
         board_state = state['board_state']
         move_history = state['move_history']
         battle_history = state['battle_history']
@@ -143,17 +143,22 @@ class DQNAgent:
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size), inferred_pieces
 
-        state_tensor = torch.tensor(board_state, dtype=torch.float32)
+        state_tensor = torch.tensor(board_state, dtype=torch.float32).unsqueeze(0)
 
-        # 确保 state_tensor 的形状是 [1, board_rows, board_cols, len(piece_types) + 1]
-        if state_tensor.shape != torch.Size([1, self.model.board_rows, self.model.board_cols, len(self.model.piece_types) + 1]):
-            # 强制调整形状
-            state_tensor = state_tensor.view(1, self.model.board_rows, self.model.board_cols, len(self.model.piece_types) + 1)
+        # 动态调整输入形状以匹配模型预期形状
+        if state_tensor.shape[1] != 4:
+            # 计算新的形状
+            num_channels = state_tensor.shape[1]
+            if num_channels > 4:
+                state_tensor = state_tensor[:, :4, :, :]  # 如果通道数大于4，则截取前4个通道
+            else:
+                # 如果通道数少于4，则填充0使其达到4个通道
+                padding = torch.zeros((state_tensor.shape[0], 4 - num_channels, state_tensor.shape[2], state_tensor.shape[3]), device=state_tensor.device)
+                state_tensor = torch.cat((state_tensor, padding), dim=1)
 
         act_values = self.model(state_tensor)
         return torch.argmax(act_values[0]).item(), inferred_pieces
-
-
+    
     def prepare_input(self, board_state, move_history, battle_history, opponent_commander_dead, pos):
         x, y = pos
         input_data = np.zeros((4, self.model.board_rows, self.model.board_cols))

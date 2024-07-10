@@ -61,14 +61,6 @@ red_pieces = env.red_pieces
 blue_pieces = env.blue_pieces
 
 initial_board = [red_pieces, blue_pieces]
-import gym
-import numpy as np
-from dqn_agent_infer import DQNAgent, DoubleDQN
-
-import gym
-import numpy as np
-from dqn_agent_infer import DQNAgent, DoubleDQN
-import numpy as np
 
 def train_agent(env, agent, episodes=3000):
     rewards = []
@@ -76,6 +68,7 @@ def train_agent(env, agent, episodes=3000):
 
     for e in range(episodes):
         state = env.reset()
+        env.generate_random_histories()
         total_reward = 0
         done = False
         loss_list = []
@@ -84,17 +77,15 @@ def train_agent(env, agent, episodes=3000):
             try:
                 action, inferred_pieces = agent.act(state)
                 next_state, reward, done, _ = env.step(action)
-                
                 # 打印当前状态和动作以进行调试
-                print(f"Episode: {e}, State shape: {state['board_state'].shape}, Action: {action}")
-                
+                print(f"Episode: {e}, Action: {action}, Inferred Pieces: {inferred_pieces}")
                 agent.remember(state, action, reward, next_state, done)
                 agent.replay()
                 state = next_state
                 total_reward += reward
             except ValueError as ve:
-                print(f"ValueError encountered: {ve}")
-                print(f"State tensor shape: {state['board_state'].shape}")
+                # print(f"ValueError encountered: {ve}")
+                # print(f"State tensor shape: {state['board_state'].shape}")
                 raise ve
 
         rewards.append(total_reward)
@@ -109,8 +100,6 @@ def train_agent(env, agent, episodes=3000):
             print(f"Episode: {e}/{episodes}, Reward: {total_reward}, Avg Loss: {avg_loss if avg_loss is not None else 'N/A'}")
 
     return rewards, losses
-
-initial_board = [red_pieces, blue_pieces]
 
 env_infer = JunQiEnvInfer(initial_board=initial_board)
 state_shape = env_infer.observation_space.shape

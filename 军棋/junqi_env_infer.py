@@ -45,12 +45,13 @@ class JunQiEnvInfer(gym.Env):
         self.move_history = []
         self.battle_history = []
         self.turn = 0
+        self.initial_board = initial_board
         self.red_commander_dead = False
         self.blue_commander_dead = False
-
         self.reset()
 
     def reset(self):
+        self.red_pieces, self.blue_pieces = self.create_pieces(self.initial_board)
         self.board = np.zeros((self.board_rows, self.board_cols))
         self.occupied_positions_red = set()
         self.occupied_positions_blue = set()
@@ -64,14 +65,13 @@ class JunQiEnvInfer(gym.Env):
                 self.occupied_positions_blue.add(position)
         self.state = 'play'
         self.turn = 0
-        self.move_history = []
-        self.battle_history = []
         self.red_commander_dead = False
         self.blue_commander_dead = False
-        self.generate_random_histories()
         return self.get_state()
     
     def generate_random_histories(self):
+        self.move_history = []
+        self.battle_history = []
         def move_and_battle(piece, piece_list, opponent_positions):
             pos = piece.get_position()
             valid_moves = self.get_valid_moves(piece)
@@ -98,8 +98,8 @@ class JunQiEnvInfer(gym.Env):
 
         piece_positions_red = [(piece, piece.get_position()) for piece in self.red_pieces if piece.get_position()]
         piece_positions_blue = [(piece, piece.get_position()) for piece in self.blue_pieces if piece.get_position()]
-
-        for _ in range(2000):
+        num = random.randint(500,1500)
+        for _ in range(num):
             opponent_positions_blue_set = {pos for _, pos in piece_positions_blue}
             opponent_positions_red_set = {pos for _, pos in piece_positions_red}
 
@@ -251,14 +251,12 @@ class JunQiEnvInfer(gym.Env):
             'opponent_commander_dead': self.blue_commander_dead if self.turn % 2 == 0 else self.red_commander_dead  # 添加这个字段
         }
 
-
     def step(self, action):
         inferred_pieces = self.decode_action(action)  # 将整数动作解码为推理结果
         reward = self.calculate_reward(inferred_pieces)
         done = self.is_terminal_state()
         info = {}
         self.turn += 1  # 更新回合数
-
         if self.red_commander_dead:
             for piece in self.blue_pieces:
                 if piece.get_name() == '军旗':
@@ -267,7 +265,6 @@ class JunQiEnvInfer(gym.Env):
             for piece in self.red_pieces:
                 if piece.get_name() == '军旗':
                     piece.set_revealed(True)
-
         return self.get_state(), reward, done, info
 
     def calculate_reward(self, inferred_pieces):
