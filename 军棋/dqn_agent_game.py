@@ -115,11 +115,11 @@ class POMCP:
         env_copy = copy.deepcopy(self.env)
         env_copy.set_state(state)
 
-        max_simulation_depth = 20  # 初始模拟深度
+        max_simulation_depth = 30  # 初始模拟深度
         if len(env_copy.red_pieces) + len(env_copy.blue_pieces) < 20:
-            max_simulation_depth = 30  # 棋子较少时增加模拟深度
+            max_simulation_depth = 50  # 棋子较少时增加模拟深度
         elif len(env_copy.red_pieces) + len(env_copy.blue_pieces) < 10:
-            max_simulation_depth = 50  # 棋子更少时进一步增加模拟深度
+            max_simulation_depth = 100  # 棋子更少时进一步增加模拟深度
 
         total_reward = 0  # 累计奖励
 
