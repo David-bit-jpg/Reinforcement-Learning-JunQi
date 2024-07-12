@@ -5,7 +5,8 @@ import numpy as np
 from collections import deque
 import random
 from dqn_agent_game import DQNAgent
-from junqi_env_game import JunQiEnvGame
+from junqi_env_game import JunQiEnvGame as JunQiEnvGameModel
+from junqi_env_game_model import JunQiEnvGame as JunQiEnvGameSetModel
 from dqn_agent_setup import DQNAgent as DQNAgentSetUp
 from junqi_env_setup import JunQiEnvSetUp
 from tqdm import tqdm
@@ -53,11 +54,12 @@ blue_pieces = env_setup.blue_pieces
 
 # 初始化环境和智能体
 initial_board = [red_pieces, blue_pieces]  # 初始化棋盘
-env = JunQiEnvGame(initial_board, input_size=13 * 5 * 4, hidden_size=128, output_size=65, lr=0.001)
-state_size = env.get_state_size()
-action_size = len(env.red_pieces) * env.board_rows * env.board_cols
-agent_red = DQNAgent(state_size, action_size, env, seed=0)
-agent_blue = DQNAgent(state_size, action_size, env, seed=1)
+env_model = JunQiEnvGameModel(initial_board, input_size=13 * 5 * 4, hidden_size=128, output_size=65, lr=0.001)
+env_setmodel = JunQiEnvGameSetModel(initial_board, input_size=13 * 5 * 4, hidden_size=128, output_size=65, lr=0.001)
+state_size = env_model.get_state_size()
+action_size = len(env_model.red_pieces) * env_model.board_rows * env_model.board_cols
+agent_red = DQNAgent(state_size, action_size, env_model, seed=0)
+agent_blue = DQNAgent(state_size, action_size, env_setmodel, seed=1)
 
 def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay):
     scores = []
@@ -68,7 +70,7 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
     blue_rewards = []
 
     for episode in range(num_episodes):
-        state = env.reset()
+        state = env_model.reset()
         state = state.flatten()
         score = 0
         current_player = 'red'
@@ -82,12 +84,12 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
         with tqdm(total=max_t, desc=f"Episode {episode + 1}/{num_episodes}") as pbar:
             for t in range(max_t):
                 try:
-                    action, pi, pi_reg = current_agent.act(state, env.turn, len(env.red_pieces), len(env.blue_pieces), features=[], player_color=current_player)
+                    action, pi, pi_reg = current_agent.act(state, env_model.turn, len(env_model.red_pieces), len(env_model.blue_pieces), features=[], player_color=current_player)
                 except ValueError as e:
                     print(e)
                     break
 
-                next_state, reward, done, info = env.step(action, pi, pi_reg, current_player, current_agent.get_weights())
+                next_state, reward, done, info = env_model.step(action, pi, pi_reg, current_player, current_agent.get_weights())
                 current_agent.step(state.flatten(), action, reward, next_state.flatten(), True)  # 每步都认为done是True
                 state = next_state.flatten()
                 score += reward
@@ -107,17 +109,17 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
 
                 # 每100步可视化推理棋盘
                 # if t % 100 == 0:
-                env.visualize_inferred_board(player_color=current_player)
+                env_model.visualize_inferred_board(player_color=current_player)
 
                 # 检查是否有战斗发生并记录战斗信息
                 if 'battle_info' in info:
                     battle_info = info['battle_info']
-                    last_move = (current_agent.get_piece_by_index(action // (env.board_rows * env.board_cols)), (action // env.board_cols % env.board_rows, action % env.board_cols), next_state)
-                    env.visualize_full_board(last_move=last_move, battle_info=battle_info)
+                    last_move = (current_agent.get_piece_by_index(action // (env_model.board_rows * env_model.board_cols)), (action // env_model.board_cols % env_model.board_rows, action % env_model.board_cols), next_state)
+                    env_model.visualize_full_board(last_move=last_move, battle_info=battle_info)
                     battle_info = None  # 重置战斗信息
 
                 # 检查是否有玩家获胜
-                winner = env.check_winner(current_player)
+                winner = env_model.check_winner(current_player)
                 if winner != 'No':
                     print(f"Episode {episode + 1}: {winner}")
                     break
@@ -160,5 +162,5 @@ epsilon_start = 1.0
 epsilon_end = 0.01
 epsilon_decay = 0.995
 trained_agent_red, trained_agent_blue = train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay)
-torch.save(trained_agent_red.qnetwork_local.state_dict(), '/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_agent_red.pth')
-torch.save(trained_agent_blue.qnetwork_local.state_dict(), '/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_agent_blue.pth')
+torch.save(trained_agent_red.qnetwork_local.state_dict(), '/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_agent_with_inference_model.pth')
+torch.save(trained_agent_blue.qnetwork_local.state_dict(), '/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/game_agent_without_inference_moel.pth')
