@@ -14,7 +14,7 @@ import copy
 import torch
 from dqn_agent_infer import DQNAgent as DQNAgentInfer
 from dqn_agent_infer import DoubleDQN
-
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
 
@@ -53,7 +53,7 @@ class JunQiEnvGame(gym.Env):
         self.pi_reg = None
         self.initial_board = initial_board
         self.piece_types = list(piece_encoding.keys())
-
+        self.device = device
         self.model = self.load_inference_model('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/infer_model.pth')
 
         self.move_history = []

@@ -11,6 +11,8 @@ import traceback
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import copy
+import torch
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
 
@@ -41,6 +43,7 @@ class InferenceModel:
         self.battle_history = []
         self.stationary_pieces = {}
         self.flag_positions = {}
+        self.device = device
 
     def update_belief(self, move_history, battle_history):
         self.move_history.extend(move_history)
@@ -256,7 +259,7 @@ class JunQiEnvGame(gym.Env):
     
     def set_state(self, state):
         self.state = state
-            
+
     def step(self, action, pi, pi_reg, current_player_color, weights):
         player_color, piece, target_position = self.decode_action(action)
         if piece.get_color() != current_player_color:

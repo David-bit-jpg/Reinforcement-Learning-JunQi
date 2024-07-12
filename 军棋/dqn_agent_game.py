@@ -41,7 +41,6 @@ class DuelingQNetwork(nn.Module):
         value = self.fc3_value(x)
         advantage = self.fc3_advantage(x)
         return value + advantage - advantage.mean()
-
 class PolicyValueNet(nn.Module):
     def __init__(self, board_size=13, num_features=5, hidden_size=128):
         super(PolicyValueNet, self).__init__()
@@ -51,7 +50,7 @@ class PolicyValueNet(nn.Module):
         self.board_bn2 = nn.BatchNorm2d(64)
         
         self.prob_conv = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
-        self.prob_bn = nn.BatchNorm2d(32)
+        self.prob_bn = nn.BatchNorm2d(32)  # 确保通道数为 32
         
         self.hidden_size = hidden_size
         
@@ -71,7 +70,7 @@ class PolicyValueNet(nn.Module):
         elif prob_matrix.dim() == 3:
             prob_matrix = prob_matrix.unsqueeze(1)  # 增加一个维度以符合卷积层输入要求
 
-        prob_matrix = F.relu(self.prob_bn(prob_matrix))
+        prob_matrix = F.relu(self.prob_bn(self.prob_conv(prob_matrix)))  # 修正这一行
         prob_matrix = prob_matrix.reshape(prob_matrix.size(0), -1)  # 使用 .reshape() 而不是 .view()
 
         turn = turn.reshape(turn.size(0), -1)  # 使用 .reshape() 而不是 .view()
@@ -99,12 +98,12 @@ class PolicyValueNet(nn.Module):
 import copy
 import random
 import torch
-
 class POMCP:
-    def __init__(self, env, weights, num_simulations, gamma=0.99):
+    def __init__(self, env, weights, num_simulations, agent, gamma=0.99):
         self.env = env
         self.num_simulations = num_simulations
         self.weights = weights
+        self.agent = agent  # 新增
         self.gamma = gamma  # 初始折扣因子
 
     def update_weights(self, weights):
@@ -138,17 +137,17 @@ class POMCP:
             total_reward += current_gamma * reward  # 折扣后的累计奖励
 
             # 使用策略价值网络估计当前状态的价值
-            state_tensor = torch.FloatTensor(next_state).unsqueeze(0).unsqueeze(0).to(self.env.device)
+            state_tensor = torch.FloatTensor(next_state).unsqueeze(0).unsqueeze(0).to(self.agent.device)
             state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)
-            prob_matrix = self.env.get_prob_matrix(next_state)
-            prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.env.device)
-            turn_tensor = torch.FloatTensor([env_copy.turn]).unsqueeze(0).to(self.env.device)
-            num_own_pieces_tensor = torch.FloatTensor([len(env_copy.red_pieces)]).unsqueeze(0).to(self.env.device)
-            num_opponent_pieces_tensor = torch.FloatTensor([len(env_copy.blue_pieces)]).unsqueeze(0).to(self.env.device)
-            features_tensor = torch.FloatTensor([]).unsqueeze(0).to(self.env.device)
+            prob_matrix = self.agent.get_prob_matrix(next_state)  # 使用agent调用
+            prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.agent.device)
+            turn_tensor = torch.FloatTensor([env_copy.turn]).unsqueeze(0).to(self.agent.device)
+            num_own_pieces_tensor = torch.FloatTensor([len(env_copy.red_pieces)]).unsqueeze(0).to(self.agent.device)
+            num_opponent_pieces_tensor = torch.FloatTensor([len(env_copy.blue_pieces)]).unsqueeze(0).to(self.agent.device)
+            features_tensor = torch.FloatTensor([]).unsqueeze(0).to(self.agent.device)
 
             with torch.no_grad():
-                _, value_estimation = self.env.policy_value_net(state_tensor, prob_matrix_tensor, turn_tensor, num_own_pieces_tensor, num_opponent_pieces_tensor, features_tensor)
+                _, value_estimation = self.agent.policy_value_net(state_tensor, prob_matrix_tensor, turn_tensor, num_own_pieces_tensor, num_opponent_pieces_tensor, features_tensor)
             total_value += current_gamma * value_estimation.item()  # 折扣后的累计价值估计
 
             if done or (isinstance(env_copy.state, str) and env_copy.state in ['red_wins', 'blue_wins']):
@@ -173,22 +172,21 @@ class POMCP:
         next_state, reward, done, _ = env_copy.step_with_inference(action, self.env.pi, self.env.pi_reg, player_color, self.weights)
 
         # 使用策略价值网络估计当前状态的价值
-        state_tensor = torch.FloatTensor(next_state).unsqueeze(0).unsqueeze(0).to(self.env.device)
+        state_tensor = torch.FloatTensor(next_state).unsqueeze(0).unsqueeze(0).to(self.agent.device)
         state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)
-        prob_matrix = self.env.get_prob_matrix(next_state)
-        prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.env.device)
-        turn_tensor = torch.FloatTensor([env_copy.turn]).unsqueeze(0).to(self.env.device)
-        num_own_pieces_tensor = torch.FloatTensor([len(env_copy.red_pieces)]).unsqueeze(0).to(self.env.device)
-        num_opponent_pieces_tensor = torch.FloatTensor([len(env_copy.blue_pieces)]).unsqueeze(0).to(self.env.device)
-        features_tensor = torch.FloatTensor([]).unsqueeze(0).to(self.env.device)
+        prob_matrix = self.agent.get_prob_matrix(next_state)  # 使用agent调用
+        prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.agent.device)
+        turn_tensor = torch.FloatTensor([env_copy.turn]).unsqueeze(0).to(self.agent.device)
+        num_own_pieces_tensor = torch.FloatTensor([len(env_copy.red_pieces)]).unsqueeze(0).to(self.agent.device)
+        num_opponent_pieces_tensor = torch.FloatTensor([len(env_copy.blue_pieces)]).unsqueeze(0).to(self.agent.device)
+        features_tensor = torch.FloatTensor([]).unsqueeze(0).to(self.agent.device)
 
         with torch.no_grad():
-            _, value_estimation = self.env.policy_value_net(state_tensor, prob_matrix_tensor, turn_tensor, num_own_pieces_tensor, num_opponent_pieces_tensor, features_tensor)
+            _, value_estimation = self.agent.policy_value_net(state_tensor, prob_matrix_tensor, turn_tensor, num_own_pieces_tensor, num_opponent_pieces_tensor, features_tensor)
 
         # 计算综合评估值（折扣后的奖励 + 折扣后的价值估计）
         current_gamma = self.gamma ** depth
         return reward + current_gamma * value_estimation.item()
-
 class DQNAgent:
     def __init__(self, state_size, action_size, env, seed, gamma=0.99, lr=0.001, buffer_size=50000, batch_size=64, update_every=4, tau=0.001, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995):
         self.state_size = state_size
@@ -234,11 +232,11 @@ class DQNAgent:
             "block_opponent_strategy_reward": 1.0,
             "aggressive_attack_reward": 1.0
         }
-        self.pomcp = POMCP(env, self.weights, num_simulations=50)
+        self.pomcp = POMCP(env, self.weights, num_simulations=50, agent= self)
         
     def get_weights(self):
         return self.weights
-        
+            
     def adjust_weights(self, game_state):
         # 获取当前游戏状态的相关信息
         num_own_pieces = len([p for p in self.env.red_pieces if p.get_position()])
@@ -300,6 +298,12 @@ class DQNAgent:
                 self.weights["protection_reward"] += 0.2
             else:
                 self.weights["protection_reward"] -= 0.1
+
+        # 使用铁路和行营控制的数量来调整权重
+        self.weights["attack_important_reward"] += 0.1 * own_railway_control
+        self.weights["protection_reward"] -= 0.1 * opponent_railway_control
+        self.weights["attack_important_reward"] += 0.1 * own_camp_control
+        self.weights["protection_reward"] -= 0.1 * opponent_camp_control
 
         # 增加战术欺骗的奖励
         for piece in self.env.red_pieces:
@@ -468,9 +472,6 @@ class DQNAgent:
         self.policy_value_optimizer.zero_grad()
         policy_loss.backward()
         self.policy_value_optimizer.step()
-        # 打印损失
-        print(f"Q Network Loss: {loss.item():.4f}, Policy Loss: {policy_loss.item():.4f}")
-
 
 
 
