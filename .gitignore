@@ -23,3 +23,4 @@ model/Meta-Llama-3-8B-Instruct/tokenizer_config.json
 model/Meta-Llama-3-8B-Instruct/USE_POLICY.md
 model/Meta-Llama-3-8B-Instruct/关注github获取最新的中文预训练增强llama3大模型.txt
 model/Meta-Llama-3-8B-Instruct/扫码加入社区在线体验llama3大模型.jpg
+军棋/models/infer_model.pth
