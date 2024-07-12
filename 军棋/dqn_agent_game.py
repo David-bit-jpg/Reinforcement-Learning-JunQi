@@ -97,7 +97,7 @@ class PolicyValueNet(nn.Module):
         return policy, value
 
 class POMCP:
-    def __init__(self, env,weights,num_simulations):
+    def __init__(self, env, weights, num_simulations):
         self.env = env
         self.num_simulations = num_simulations
         self.weights = weights
@@ -115,11 +115,13 @@ class POMCP:
         env_copy = copy.deepcopy(self.env)
         env_copy.set_state(state)
 
-        max_simulation_depth = 50 # 初始模拟深度
+        max_simulation_depth = 20  # 初始模拟深度
         if len(env_copy.red_pieces) + len(env_copy.blue_pieces) < 20:
-            max_simulation_depth = 60  # 棋子较少时增加模拟深度
+            max_simulation_depth = 30  # 棋子较少时增加模拟深度
         elif len(env_copy.red_pieces) + len(env_copy.blue_pieces) < 10:
-            max_simulation_depth = 100  # 棋子更少时进一步增加模拟深度
+            max_simulation_depth = 50  # 棋子更少时进一步增加模拟深度
+
+        total_reward = 0  # 累计奖励
 
         for _ in range(max_simulation_depth):  # 使用动态调整后的模拟深度
             valid_actions = env_copy.get_valid_actions(player_color)
@@ -127,9 +129,11 @@ class POMCP:
                 break
             action = random.choice(valid_actions)
             next_state, reward, done, _ = env_copy.step_with_inference(action, pi, pi_reg, player_color, self.weights)
-            if isinstance(env_copy.state, str) and env_copy.state in ['red_wins', 'blue_wins']:
-                break
+            total_reward += reward  # 累计奖励
 
+            # 使用next_state和done进行控制
+            if done or (isinstance(env_copy.state, str) and env_copy.state in ['red_wins', 'blue_wins']):
+                break
 
     def _best_actions(self, state, player_color):
         valid_actions = self.env.get_valid_actions(player_color)
@@ -139,7 +143,7 @@ class POMCP:
     def _evaluate_action(self, state, action, player_color):
         env_copy = copy.deepcopy(self.env)
         env_copy.set_state(state)
-        next_state, reward, done, _ = env_copy.step_with_inference(action, self.env.pi, self.env.pi_reg, player_color,self.weights)
+        next_state, reward, done, _ = env_copy.step_with_inference(action, self.env.pi, self.env.pi_reg, player_color, self.weights)
         return reward
 
 class DQNAgent:
@@ -181,13 +185,17 @@ class DQNAgent:
             "bluffing_reward": 0.7,
             "collaboration_reward": 0.6,
             "defensive_attack_reward": 0.9,
-            "attack_flag_reward": 1.0
+            "attack_flag_reward": 1.0,
+            "bomb_risk_reward": 0.8,
+            "offensive_defensive_reward": 1.0,
+            "block_opponent_strategy_reward": 1.0,
+            "aggressive_attack_reward": 1.0
         }
-        self.pomcp = POMCP(env, self.weights,num_simulations=50)
+        self.pomcp = POMCP(env, self.weights, num_simulations=50)
         
     def get_weights(self):
         return self.weights
-    
+        
     def adjust_weights(self, game_state):
         # 获取当前游戏状态的相关信息
         num_own_pieces = len([p for p in self.env.red_pieces if p.get_position()])
@@ -199,66 +207,107 @@ class DQNAgent:
         num_own_high_value_pieces = len([p for p in self.env.red_pieces if p.get_position() and p.get_name() in ['司令', '军长']])
         num_opponent_high_value_pieces = len([p for p in self.env.blue_pieces if p.get_position() and p.get_name() in ['司令', '军长']])
 
-        # 根据己方和对方剩余棋子的数量调整权重
+        # 战略位置权重
+        own_railway_control = sum([1 for p in self.env.red_pieces if p.get_position() and self.env.is_railway(p.get_position())])
+        opponent_railway_control = sum([1 for p in self.env.blue_pieces if p.get_position() and self.env.is_railway(p.get_position())])
+        own_camp_control = sum([1 for p in self.env.red_pieces if p.get_position() and self.env.is_in_camp(p.get_position())])
+        opponent_camp_control = sum([1 for p in self.env.blue_pieces if p.get_position() and self.env.is_in_camp(p.get_position())])
+
+        # 调整进攻与防守的权重
         if num_own_pieces > num_opponent_pieces:
-            self.weights["attack_important_reward"] += 0.1
-            self.weights["protection_reward"] -= 0.1
+            self.weights["attack_important_reward"] += 0.2
+            self.weights["protection_reward"] -= 0.2
         else:
-            self.weights["attack_important_reward"] -= 0.1
-            self.weights["protection_reward"] += 0.1
+            self.weights["attack_important_reward"] -= 0.2
+            self.weights["protection_reward"] += 0.2
 
         # 如果己方军旗位置已知，则增加保护军旗的权重
         if own_flag_position:
-            self.weights["protection_reward"] += 0.2
+            self.weights["protection_reward"] += 0.3
         else:
-            self.weights["protection_reward"] -= 0.2
+            self.weights["protection_reward"] -= 0.3
 
         # 如果对方军旗位置已知，则增加攻击敌方军旗的权重
         if opponent_flag_position:
-            self.weights["attack_flag_reward"] += 0.2
+            self.weights["attack_flag_reward"] += 0.3
         else:
-            self.weights["attack_flag_reward"] -= 0.2
+            self.weights["attack_flag_reward"] -= 0.3
 
         # 根据高级棋子的剩余数量调整权重
         if num_own_high_value_pieces > num_opponent_high_value_pieces:
-            self.weights["defensive_attack_reward"] += 0.1
+            self.weights["defensive_attack_reward"] += 0.2
         else:
-            self.weights["defensive_attack_reward"] -= 0.1
+            self.weights["defensive_attack_reward"] -= 0.2
 
         # 检查己方高级棋子是否处于危险位置，如果是则增加保护权重
         for piece in self.env.red_pieces:
             if piece.get_position() and piece.get_name() in ['司令', '军长']:
                 if not self.env.is_in_camp(piece.get_position()):
-                    self.weights["protection_reward"] += 0.2
+                    self.weights["protection_reward"] += 0.3
+                else:
+                    self.weights["protection_reward"] -= 0.1
 
         # 增加对关键位置的防御权重，例如铁路和行营
         for piece in self.env.red_pieces:
             if piece.get_position() and self.env.is_railway(piece.get_position()):
-                self.weights["defensive_attack_reward"] += 0.1
+                self.weights["defensive_attack_reward"] += 0.2
+            else:
+                self.weights["defensive_attack_reward"] -= 0.1
             if piece.get_position() and self.env.is_in_camp(piece.get_position()):
-                self.weights["protection_reward"] += 0.1
+                self.weights["protection_reward"] += 0.2
+            else:
+                self.weights["protection_reward"] -= 0.1
 
         # 增加战术欺骗的奖励
         for piece in self.env.red_pieces:
             if piece.get_position() and piece.get_name() in ['工兵', '排长']:
-                self.weights["bluffing_reward"] += 0.1
+                self.weights["bluffing_reward"] += 0.2
+            else:
+                self.weights["bluffing_reward"] -= 0.1
             if piece.get_position() and piece.get_name() in ['连长', '营长', '团长']:
-                self.weights["bluffing_reward"] += 0.05
+                self.weights["bluffing_reward"] += 0.1
+            else:
+                self.weights["bluffing_reward"] -= 0.05
 
         # 检查对方司令是否已经死亡
         opponent_commander_dead = not any(p.get_name() == '司令' and p.get_color() == 'blue' for p in self.env.blue_pieces if p.get_position())
         if opponent_commander_dead:
-            self.weights["attack_flag_reward"] += 0.3  # 对方司令死亡后，增加对军旗的攻击权重
+            self.weights["attack_flag_reward"] += 0.4  # 对方司令死亡后，增加对军旗的攻击权重
+        else:
+            self.weights["attack_flag_reward"] -= 0.2
+
+        # 识破对方进攻意图并进行应对
+        for piece in self.env.blue_pieces:
+            if piece.get_position() and piece.get_name() == '工兵':
+                target_positions = self.env.get_valid_moves(piece)
+                for target in target_positions:
+                    if self.env.get_piece_at_position(target) and self.env.get_piece_at_position(target).get_name() in ['地雷', '炸弹']:
+                        self.weights["block_opponent_strategy_reward"] += 0.3
+                    else:
+                        self.weights["block_opponent_strategy_reward"] -= 0.1
+
+        # 增加对关键位置的进攻权重
+        for piece in self.env.red_pieces:
+            if piece.get_position() and self.env.is_railway(piece.get_position()):
+                self.weights["aggressive_attack_reward"] += 0.2
+            else:
+                self.weights["aggressive_attack_reward"] -= 0.1
+            if piece.get_position() and self.env.is_in_camp(piece.get_position()):
+                self.weights["aggressive_attack_reward"] += 0.2
+            else:
+                self.weights["aggressive_attack_reward"] -= 0.1
 
         # 确保所有必要的键都存在
         required_keys = [
             "base_reward", "protection_reward", "attack_important_reward", "defense_strategy_reward",
             "engineer_mine_reward", "movement_distance_reward", "bluffing_reward", "collaboration_reward",
-            "defensive_attack_reward", "attack_flag_reward"
+            "defensive_attack_reward", "attack_flag_reward", "bomb_risk_reward", "offensive_defensive_reward",
+            "block_opponent_strategy_reward", "aggressive_attack_reward"
         ]
         for key in required_keys:
             if key not in self.weights:
                 self.weights[key] = 1.0  # 或者其他合理的初始值
+
 
     def get_prob_matrix(self, state):
         prob_matrix = np.zeros((self.env.board_rows, self.env.board_cols))
@@ -269,7 +318,6 @@ class DQNAgent:
         return prob_matrix
             
     def act(self, state, turn, num_own_pieces, num_opponent_pieces, features, player_color):
-        # print(f"Current player color in act: {player_color}")
         self.adjust_weights(state)
         self.pomcp.update_weights(self.weights)
         state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).to(self.device)  # 调整维度
@@ -324,7 +372,6 @@ class DQNAgent:
 
         self.pi = policy.cpu().numpy()  # 将策略值保存为 numpy 数组
         self.pi_reg = self.pi.copy()    # 将正则化策略值保存为 numpy 数组
-        # print(f"Selected action: {action}")
         return action, self.pi, self.pi_reg
 
     def step(self, state, action, reward, next_state, done):
@@ -387,7 +434,6 @@ class DQNAgent:
     def soft_update(self, local_model, target_model, tau):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau * local_param.data + (1.0 - tau) * target_param.data)
-
 
     def reward_transformation(self, reward, pi, pi_reg, eta):
         if pi == 0:

@@ -61,32 +61,26 @@ red_pieces = env.red_pieces
 blue_pieces = env.blue_pieces
 
 initial_board = [red_pieces, blue_pieces]
-
-def train_agent(env, agent, episodes=3000):
+def train_agent(env, agent, episodes=1000):
     rewards = []
     losses = []
 
     for e in range(episodes):
-        state = env.reset()
-        env.generate_random_histories()
+        state = env.reset()  # 重置环境状态
+        env.generate_random_histories()  # 生成新的随机历史数据
         total_reward = 0
         done = False
         loss_list = []
 
         while not done:
-            try:
-                action, inferred_pieces = agent.act(state)
-                next_state, reward, done, _ = env.step(action)
-                # 打印当前状态和动作以进行调试
-                print(f"Episode: {e}, Action: {action}, Inferred Pieces: {inferred_pieces}")
-                agent.remember(state, action, reward, next_state, done)
-                agent.replay()
-                state = next_state
-                total_reward += reward
-            except ValueError as ve:
-                # print(f"ValueError encountered: {ve}")
-                # print(f"State tensor shape: {state['board_state'].shape}")
-                raise ve
+            action, inferred_pieces = agent.act(state)  # 代理根据当前状态采取行动
+            next_state, reward, done, _ = env.step(action)  # 环境根据行动更新状态
+            agent.remember(state, action, reward, next_state, done)  # 保存经验到回放记忆
+            loss = agent.replay()  # 从记忆中抽样并训练代理
+            state = next_state
+            total_reward += reward
+            if loss is not None:
+                loss_list.append(loss)
 
         rewards.append(total_reward)
         if len(loss_list) > 0:
@@ -96,8 +90,9 @@ def train_agent(env, agent, episodes=3000):
             avg_loss = None
             losses.append(None)
 
-        if e % 10 == 0:
-            print(f"Episode: {e}/{episodes}, Reward: {total_reward}, Avg Loss: {avg_loss if avg_loss is not None else 'N/A'}")
+        # 在每个epoch结束后打印battle_history
+        print(f"Episode: {e}/{episodes}, Reward: {total_reward}, Avg Loss: {avg_loss if avg_loss is not None else 'N/A'}")
+        # print("Battle History:", env.battle_history)  # 打印当前episode的战斗历史
 
     return rewards, losses
 
@@ -110,7 +105,7 @@ target_model = DoubleDQN(state_shape[0], state_shape[1], list(piece_encoding.key
 
 agent_infer = DQNAgent(model, target_model, action_size, initial_board)
 
-rewards, losses = train_agent(env_infer, agent_infer, episodes=3000)
+rewards, losses = train_agent(env_infer, agent_infer, episodes=1000)
 
 # 保存模型权重
 agent_infer.save('/Users/davidwang/Documents/GitHub/LLM_GAME/军棋/models/infer_model.pth')

@@ -55,9 +55,13 @@ class RewardModel:
             "engineer_mine_reward": self._calculate_engineer_mine_reward(piece, target_position),
             "movement_distance_reward": self._calculate_movement_distance_reward(piece, target_position),
             "defense_strategy_reward": self._calculate_defense_strategy_reward(piece, target_position, weights),
-            "defensive_attack_reward": self._calculate_defensive_attack_reward(piece, target_position)
+            "defensive_attack_reward": self._calculate_defensive_attack_reward(piece, target_position),
+            "bomb_risk_reward": self._calculate_bomb_risk_reward(piece, target_position),
+            "offensive_defensive_reward": self._calculate_offensive_defensive_reward(piece, target_position, player_color, weights),
+            "block_opponent_strategy_reward": self._calculate_block_opponent_strategy_reward(piece, target_position, player_color),
+            "aggressive_attack_reward": self._calculate_aggressive_attack_reward(piece, target_position, player_color)  # 新增主动进攻奖励
         }
-        total_reward = sum(rewards[key] * weights[key] for key in rewards)
+        total_reward = sum(rewards[key] * weights.get(key, 1.0) for key in rewards)
         return total_reward
 
     def _calculate_additional_penalties(self, piece, target_position, outcome):
@@ -330,3 +334,47 @@ class RewardModel:
         if target_position not in valid_moves:
             return 10  # 给予惩罚分数
         return 0
+
+    def _calculate_bomb_risk_reward(self, piece, target_position):
+        # 判断大棋子是否面临被炸弹炸掉的风险，并考虑权衡
+        reward = 0
+        opponent_piece = self.env.get_piece_at_position(target_position)
+        if piece.get_name() in ['师长', '军长', '司令']:
+            if opponent_piece and opponent_piece.get_name() == '炸弹':
+                reward -= self.get_piece_value(piece) * 2  # 被炸弹炸掉的惩罚
+            else:
+                reward += self.get_piece_value(piece) * 0.1  # 进攻的奖励
+        return reward
+
+    def _calculate_offensive_defensive_reward(self, piece, target_position, player_color, weights):
+        # 评估子力对比，判断需要进行防守还是进攻
+        reward = 0
+        own_pieces_value = sum(self.get_piece_value(p) for p in (self.red_pieces if player_color == 'red' else self.blue_pieces) if p.get_position())
+        opponent_pieces_value = sum(self.get_piece_value(p) for p in (self.blue_pieces if player_color == 'red' else self.red_pieces) if p.get_position())
+
+        if own_pieces_value > opponent_pieces_value:
+            reward += 5  # 进攻奖励
+        else:
+            reward += 3  # 防守奖励
+
+        return reward
+
+    def _calculate_block_opponent_strategy_reward(self, piece, target_position, player_color):
+        # 阻止对手的战略，例如阻止工兵清除地雷或炸弹
+        reward = 0
+        opponent_color = 'blue' if player_color == 'red' else 'red'
+        if piece.get_name() != '地雷':
+            neighbors = self.get_neighbors(target_position, opponent_color)
+            for neighbor_pos in neighbors:
+                neighbor_piece = self.env.get_piece_at_position(neighbor_pos)
+                if neighbor_piece and neighbor_piece.get_color() == opponent_color and neighbor_piece.get_name() == '工兵':
+                    reward += 5  # 阻止对方工兵的奖励
+        return reward
+
+    def _calculate_aggressive_attack_reward(self, piece, target_position, player_color):
+        # 鼓励主动进攻的奖励
+        reward = 0
+        opponent_piece = self.env.get_piece_at_position(target_position)
+        if opponent_piece and opponent_piece.get_color() != piece.get_color():
+            reward += 10  # 主动进攻的奖励
+        return reward

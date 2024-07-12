@@ -106,8 +106,8 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
                 pbar.update(1)
 
                 # 每100步可视化推理棋盘
-                if t % 100 == 0:
-                    env.visualize_inferred_board(player_color=current_player)
+                # if t % 100 == 0:
+                env.visualize_inferred_board(player_color=current_player)
 
                 # 检查是否有战斗发生并记录战斗信息
                 if 'battle_info' in info:

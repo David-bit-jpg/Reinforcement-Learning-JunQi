@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 from reward_model_infer import RewardModel
 from pieces import Piece
+import copy
 
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
@@ -49,29 +50,20 @@ class JunQiEnvInfer(gym.Env):
         self.red_commander_dead = False
         self.blue_commander_dead = False
         self.reset()
-
+        
     def reset(self):
         self.red_pieces, self.blue_pieces = self.create_pieces(self.initial_board)
         self.board = np.zeros((self.board_rows, self.board_cols))
-        self.occupied_positions_red = set()
-        self.occupied_positions_blue = set()
-        for piece in self.red_pieces:
-            position = piece.get_position()
-            if position:
-                self.occupied_positions_red.add(position)
-        for piece in self.blue_pieces:
-            position = piece.get_position()
-            if position:
-                self.occupied_positions_blue.add(position)
-        self.state = 'play'
+        self.move_history = []  # 清空移动历史
+        self.battle_history = []  # 清空战斗历史
         self.turn = 0
         self.red_commander_dead = False
         self.blue_commander_dead = False
+
         return self.get_state()
-    
+
     def generate_random_histories(self):
-        self.move_history = []
-        self.battle_history = []
+
         def move_and_battle(piece, piece_list, opponent_positions):
             pos = piece.get_position()
             valid_moves = self.get_valid_moves(piece)
@@ -98,7 +90,7 @@ class JunQiEnvInfer(gym.Env):
 
         piece_positions_red = [(piece, piece.get_position()) for piece in self.red_pieces if piece.get_position()]
         piece_positions_blue = [(piece, piece.get_position()) for piece in self.blue_pieces if piece.get_position()]
-        num = random.randint(500,1500)
+        num = random.randint(500,1000)
         for _ in range(num):
             opponent_positions_blue_set = {pos for _, pos in piece_positions_blue}
             opponent_positions_red_set = {pos for _, pos in piece_positions_red}
@@ -138,6 +130,7 @@ class JunQiEnvInfer(gym.Env):
                                 piece_positions_red = [(p, p.get_position()) for p in self.red_pieces if p.get_position()]
                                 piece_positions_blue = [(p, p.get_position()) for p in self.blue_pieces if p.get_position()]
                                 break
+        print("Battle history generated:", self.battle_history)
 
     def piece_name_to_value(self, piece_name):
         value_map = {
@@ -376,15 +369,20 @@ class JunQiEnvInfer(gym.Env):
         return False
 
     def create_pieces(self, initial_board):
-        red_pieces = initial_board[0] if initial_board else self.generate_random_pieces('red')
-        blue_pieces = initial_board[1] if initial_board else self.generate_random_pieces('blue')
-        for piece in red_pieces:
-            position = piece.get_position()
-            self.occupied_positions_red.add(position)
-        for piece in blue_pieces:
-            position = piece.get_position()
-            self.occupied_positions_blue.add(position)
+        if initial_board:
+            # 使用深拷贝确保棋子状态的完全复制，避免修改影响原始数据
+            red_pieces = copy.deepcopy(initial_board[0])
+            blue_pieces = copy.deepcopy(initial_board[1])
+        else:
+            # 如果没有提供初始棋盘，生成随机棋子布局
+            red_pieces = self.generate_random_pieces('red')
+            blue_pieces = self.generate_random_pieces('blue')
+        
+        # 更新占据的位置集合
+        self.occupied_positions_red = {piece.get_position() for piece in red_pieces if piece.get_position()}
+        self.occupied_positions_blue = {piece.get_position() for piece in blue_pieces if piece.get_position()}
         return red_pieces, blue_pieces
+
 
     def generate_random_pieces(self, color):
         pieces = []
