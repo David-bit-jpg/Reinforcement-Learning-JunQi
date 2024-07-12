@@ -468,6 +468,9 @@ class DQNAgent:
         self.policy_value_optimizer.zero_grad()
         policy_loss.backward()
         self.policy_value_optimizer.step()
+        # 打印损失
+        print(f"Q Network Loss: {loss.item():.4f}, Policy Loss: {policy_loss.item():.4f}")
+
 
 
 

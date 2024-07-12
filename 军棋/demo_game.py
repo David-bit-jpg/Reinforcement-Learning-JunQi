@@ -90,7 +90,7 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
                     break
 
                 next_state, reward, done, info = env_model.step(action, pi, pi_reg, current_player, current_agent.get_weights())
-                current_agent.step(state.flatten(), action, reward, next_state.flatten(), True)  # 每步都认为done是True
+                current_agent.step(state.flatten(), action, reward, next_state.flatten(), done)
                 state = next_state.flatten()
                 score += reward
 
