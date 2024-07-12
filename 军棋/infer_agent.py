@@ -90,9 +90,8 @@ def train_agent(env, agent, episodes=1000):
             avg_loss = None
             losses.append(None)
 
-        # 在每个epoch结束后打印battle_history
+        # 在每个episode结束后打印信息
         print(f"Episode: {e}/{episodes}, Reward: {total_reward}, Avg Loss: {avg_loss if avg_loss is not None else 'N/A'}")
-        # print("Battle History:", env.battle_history)  # 打印当前episode的战斗历史
 
     return rewards, losses
 

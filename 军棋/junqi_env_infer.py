@@ -130,7 +130,7 @@ class JunQiEnvInfer(gym.Env):
                                 piece_positions_red = [(p, p.get_position()) for p in self.red_pieces if p.get_position()]
                                 piece_positions_blue = [(p, p.get_position()) for p in self.blue_pieces if p.get_position()]
                                 break
-        print("Battle history generated:", self.battle_history)
+        # print("Battle history generated:", self.battle_history)
 
     def piece_name_to_value(self, piece_name):
         value_map = {

@@ -71,7 +71,7 @@ class PolicyValueNet(nn.Module):
         elif prob_matrix.dim() == 3:
             prob_matrix = prob_matrix.unsqueeze(1)  # 增加一个维度以符合卷积层输入要求
 
-        prob_matrix = F.relu(self.prob_bn(self.prob_conv(prob_matrix)))
+        prob_matrix = F.relu(self.prob_bn(prob_matrix))
         prob_matrix = prob_matrix.reshape(prob_matrix.size(0), -1)  # 使用 .reshape() 而不是 .view()
 
         turn = turn.reshape(turn.size(0), -1)  # 使用 .reshape() 而不是 .view()
@@ -96,22 +96,26 @@ class PolicyValueNet(nn.Module):
 
         return policy, value
 
+import copy
+import random
+import torch
+
 class POMCP:
-    def __init__(self, env, weights, num_simulations):
+    def __init__(self, env, weights, num_simulations, gamma=0.99):
         self.env = env
         self.num_simulations = num_simulations
         self.weights = weights
-        
+        self.gamma = gamma  # 初始折扣因子
+
     def update_weights(self, weights):
         self.weights = weights
 
     def search(self, initial_state, player_color, pi, pi_reg):
         for _ in range(self.num_simulations):
-            self._simulate(initial_state, player_color, pi, pi_reg)
-
+            self._simulate(initial_state, player_color, pi, pi_reg, depth=0)
         return self._best_actions(initial_state, player_color)
 
-    def _simulate(self, state, player_color, pi, pi_reg):
+    def _simulate(self, state, player_color, pi, pi_reg, depth):
         env_copy = copy.deepcopy(self.env)
         env_copy.set_state(state)
 
@@ -122,6 +126,8 @@ class POMCP:
             max_simulation_depth = 100  # 棋子更少时进一步增加模拟深度
 
         total_reward = 0  # 累计奖励
+        total_value = 0  # 累计价值估计
+        current_gamma = self.gamma ** depth  # 随着深度增加折扣因子递减
 
         for _ in range(max_simulation_depth):  # 使用动态调整后的模拟深度
             valid_actions = env_copy.get_valid_actions(player_color)
@@ -129,22 +135,59 @@ class POMCP:
                 break
             action = random.choice(valid_actions)
             next_state, reward, done, _ = env_copy.step_with_inference(action, pi, pi_reg, player_color, self.weights)
-            total_reward += reward  # 累计奖励
+            total_reward += current_gamma * reward  # 折扣后的累计奖励
 
-            # 使用next_state和done进行控制
+            # 使用策略价值网络估计当前状态的价值
+            state_tensor = torch.FloatTensor(next_state).unsqueeze(0).unsqueeze(0).to(self.env.device)
+            state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)
+            prob_matrix = self.env.get_prob_matrix(next_state)
+            prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.env.device)
+            turn_tensor = torch.FloatTensor([env_copy.turn]).unsqueeze(0).to(self.env.device)
+            num_own_pieces_tensor = torch.FloatTensor([len(env_copy.red_pieces)]).unsqueeze(0).to(self.env.device)
+            num_opponent_pieces_tensor = torch.FloatTensor([len(env_copy.blue_pieces)]).unsqueeze(0).to(self.env.device)
+            features_tensor = torch.FloatTensor([]).unsqueeze(0).to(self.env.device)
+
+            with torch.no_grad():
+                _, value_estimation = self.env.policy_value_net(state_tensor, prob_matrix_tensor, turn_tensor, num_own_pieces_tensor, num_opponent_pieces_tensor, features_tensor)
+            total_value += current_gamma * value_estimation.item()  # 折扣后的累计价值估计
+
             if done or (isinstance(env_copy.state, str) and env_copy.state in ['red_wins', 'blue_wins']):
                 break
 
+            # 更新当前的折扣因子
+            current_gamma *= self.gamma
+
+        # 计算最终的综合评估值（折扣后的累计奖励 + 折扣后的累计价值估计）
+        return total_reward + total_value
+
     def _best_actions(self, state, player_color):
         valid_actions = self.env.get_valid_actions(player_color)
-        best_actions = sorted(valid_actions, key=lambda a: self._evaluate_action(state, a, player_color), reverse=True)[:20]
+        action_values = [self._evaluate_action(state, a, player_color, depth=0) for a in valid_actions]
+        best_action_indices = sorted(range(len(action_values)), key=lambda i: action_values[i], reverse=True)[:20]
+        best_actions = [valid_actions[i] for i in best_action_indices]
         return best_actions
 
-    def _evaluate_action(self, state, action, player_color):
+    def _evaluate_action(self, state, action, player_color, depth):
         env_copy = copy.deepcopy(self.env)
         env_copy.set_state(state)
         next_state, reward, done, _ = env_copy.step_with_inference(action, self.env.pi, self.env.pi_reg, player_color, self.weights)
-        return reward
+
+        # 使用策略价值网络估计当前状态的价值
+        state_tensor = torch.FloatTensor(next_state).unsqueeze(0).unsqueeze(0).to(self.env.device)
+        state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)
+        prob_matrix = self.env.get_prob_matrix(next_state)
+        prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.env.device)
+        turn_tensor = torch.FloatTensor([env_copy.turn]).unsqueeze(0).to(self.env.device)
+        num_own_pieces_tensor = torch.FloatTensor([len(env_copy.red_pieces)]).unsqueeze(0).to(self.env.device)
+        num_opponent_pieces_tensor = torch.FloatTensor([len(env_copy.blue_pieces)]).unsqueeze(0).to(self.env.device)
+        features_tensor = torch.FloatTensor([]).unsqueeze(0).to(self.env.device)
+
+        with torch.no_grad():
+            _, value_estimation = self.env.policy_value_net(state_tensor, prob_matrix_tensor, turn_tensor, num_own_pieces_tensor, num_opponent_pieces_tensor, features_tensor)
+
+        # 计算综合评估值（折扣后的奖励 + 折扣后的价值估计）
+        current_gamma = self.gamma ** depth
+        return reward + current_gamma * value_estimation.item()
 
 class DQNAgent:
     def __init__(self, state_size, action_size, env, seed, gamma=0.99, lr=0.001, buffer_size=50000, batch_size=64, update_every=4, tau=0.001, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995):
@@ -420,6 +463,13 @@ class DQNAgent:
 
         self.pi = self.replicator_dynamics_update(self.pi, q_values.mean(axis=0))
 
+        # 策略更新
+        policy_loss = self.policy_loss(states, actions.squeeze(), rewards)
+        self.policy_value_optimizer.zero_grad()
+        policy_loss.backward()
+        self.policy_value_optimizer.step()
+
+
 
     def replicator_dynamics_update(self, pi, q_values, learning_rate=0.01):
         if len(pi) != len(q_values):
@@ -430,6 +480,13 @@ class DQNAgent:
         new_pi = pi * np.exp(learning_rate * q_values)
         new_pi /= new_pi.sum()
         return new_pi
+    
+    def policy_loss(self, states, actions, rewards):
+        log_probs = torch.log(self.policy_value_net(states)[0])
+        selected_log_probs = rewards * log_probs[np.arange(len(actions)), actions]
+        loss = -selected_log_probs.mean()
+        return loss
+
 
     def soft_update(self, local_model, target_model, tau):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):

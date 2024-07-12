@@ -205,7 +205,7 @@ class DQNAgent:
 
     def replay(self):
         if len(self.memory) < self.batch_size:
-            return
+            return None
         tree_idx, minibatch, ISWeights = self.memory.sample(self.batch_size)
         states = np.array([self.get_board_state(x[0]) for x in minibatch])
         actions = np.array([x[1] for x in minibatch])
@@ -237,6 +237,9 @@ class DQNAgent:
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+
+        return loss.item()  # 确保返回损失值
+
 
     def load(self, name):
         self.model.load_state_dict(torch.load(name))
