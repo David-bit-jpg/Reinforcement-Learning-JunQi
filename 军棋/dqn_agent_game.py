@@ -139,7 +139,7 @@ class POMCP:
             # 使用策略价值网络估计当前状态的价值
             state_tensor = torch.FloatTensor(next_state).unsqueeze(0).unsqueeze(0).to(self.agent.device)
             state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)
-            prob_matrix = self.agent.get_prob_matrix(next_state)  # 使用agent调用
+            prob_matrix = self.agent.get_prob_matrix(next_state, player_color)  # 使用agent调用
             prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.agent.device)
             turn_tensor = torch.FloatTensor([env_copy.turn]).unsqueeze(0).to(self.agent.device)
             num_own_pieces_tensor = torch.FloatTensor([len(env_copy.red_pieces)]).unsqueeze(0).to(self.agent.device)
@@ -174,7 +174,7 @@ class POMCP:
         # 使用策略价值网络估计当前状态的价值
         state_tensor = torch.FloatTensor(next_state).unsqueeze(0).unsqueeze(0).to(self.agent.device)
         state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)
-        prob_matrix = self.agent.get_prob_matrix(next_state)  # 使用agent调用
+        prob_matrix = self.agent.get_prob_matrix(next_state, player_color)  # 使用agent调用
         prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.agent.device)
         turn_tensor = torch.FloatTensor([env_copy.turn]).unsqueeze(0).to(self.agent.device)
         num_own_pieces_tensor = torch.FloatTensor([len(env_copy.red_pieces)]).unsqueeze(0).to(self.agent.device)
@@ -237,22 +237,26 @@ class DQNAgent:
     def get_weights(self):
         return self.weights
             
-    def adjust_weights(self, game_state):
+    def adjust_weights(self, game_state, player_color):
+        # 确定当前玩家和对手的棋子颜色
+        own_color = player_color
+        opponent_color = 'blue' if player_color == 'red' else 'red'
+
         # 获取当前游戏状态的相关信息
-        num_own_pieces = len([p for p in self.env.red_pieces if p.get_position()])
-        num_opponent_pieces = len([p for p in self.env.blue_pieces if p.get_position()])
-        own_flag_position = self.env.get_flag_position('red')
-        opponent_flag_position = self.env.get_flag_position('blue')
+        num_own_pieces = len([p for p in self.env.get_pieces(own_color) if p.get_position()])
+        num_opponent_pieces = len([p for p in self.env.get_pieces(opponent_color) if p.get_position()])
+        own_flag_position = self.env.get_flag_position(own_color)
+        opponent_flag_position = self.env.get_flag_position(opponent_color)
 
         # 高级棋子数量
-        num_own_high_value_pieces = len([p for p in self.env.red_pieces if p.get_position() and p.get_name() in ['司令', '军长']])
-        num_opponent_high_value_pieces = len([p for p in self.env.blue_pieces if p.get_position() and p.get_name() in ['司令', '军长']])
+        num_own_high_value_pieces = len([p for p in self.env.get_pieces(own_color) if p.get_position() and p.get_name() in ['司令', '军长']])
+        num_opponent_high_value_pieces = len([p for p in self.env.get_pieces(opponent_color) if p.get_position() and p.get_name() in ['司令', '军长']])
 
         # 战略位置权重
-        own_railway_control = sum([1 for p in self.env.red_pieces if p.get_position() and self.env.is_railway(p.get_position())])
-        opponent_railway_control = sum([1 for p in self.env.blue_pieces if p.get_position() and self.env.is_railway(p.get_position())])
-        own_camp_control = sum([1 for p in self.env.red_pieces if p.get_position() and self.env.is_in_camp(p.get_position())])
-        opponent_camp_control = sum([1 for p in self.env.blue_pieces if p.get_position() and self.env.is_in_camp(p.get_position())])
+        own_railway_control = sum([1 for p in self.env.get_pieces(own_color) if p.get_position() and self.env.is_railway(p.get_position())])
+        opponent_railway_control = sum([1 for p in self.env.get_pieces(opponent_color) if p.get_position() and self.env.is_railway(p.get_position())])
+        own_camp_control = sum([1 for p in self.env.get_pieces(own_color) if p.get_position() and self.env.is_in_camp(p.get_position())])
+        opponent_camp_control = sum([1 for p in self.env.get_pieces(opponent_color) if p.get_position() and self.env.is_in_camp(p.get_position())])
 
         # 调整进攻与防守的权重
         if num_own_pieces > num_opponent_pieces:
@@ -281,7 +285,7 @@ class DQNAgent:
             self.weights["defensive_attack_reward"] -= 0.2
 
         # 检查己方高级棋子是否处于危险位置，如果是则增加保护权重
-        for piece in self.env.red_pieces:
+        for piece in self.env.get_pieces(own_color):
             if piece.get_position() and piece.get_name() in ['司令', '军长']:
                 if not self.env.is_in_camp(piece.get_position()):
                     self.weights["protection_reward"] += 0.3
@@ -289,7 +293,7 @@ class DQNAgent:
                     self.weights["protection_reward"] -= 0.1
 
         # 增加对关键位置的防御权重，例如铁路和行营
-        for piece in self.env.red_pieces:
+        for piece in self.env.get_pieces(own_color):
             if piece.get_position() and self.env.is_railway(piece.get_position()):
                 self.weights["defensive_attack_reward"] += 0.2
             else:
@@ -306,7 +310,7 @@ class DQNAgent:
         self.weights["protection_reward"] -= 0.1 * opponent_camp_control
 
         # 增加战术欺骗的奖励
-        for piece in self.env.red_pieces:
+        for piece in self.env.get_pieces(own_color):
             if piece.get_position() and piece.get_name() in ['工兵', '排长']:
                 self.weights["bluffing_reward"] += 0.2
             else:
@@ -317,14 +321,14 @@ class DQNAgent:
                 self.weights["bluffing_reward"] -= 0.05
 
         # 检查对方司令是否已经死亡
-        opponent_commander_dead = not any(p.get_name() == '司令' and p.get_color() == 'blue' for p in self.env.blue_pieces if p.get_position())
+        opponent_commander_dead = not any(p.get_name() == '司令' and p.get_color() == opponent_color for p in self.env.get_pieces(opponent_color) if p.get_position())
         if opponent_commander_dead:
             self.weights["attack_flag_reward"] += 0.4  # 对方司令死亡后，增加对军旗的攻击权重
         else:
             self.weights["attack_flag_reward"] -= 0.2
 
         # 识破对方进攻意图并进行应对
-        for piece in self.env.blue_pieces:
+        for piece in self.env.get_pieces(opponent_color):
             if piece.get_position() and piece.get_name() == '工兵':
                 target_positions = self.env.get_valid_moves(piece)
                 for target in target_positions:
@@ -334,7 +338,7 @@ class DQNAgent:
                         self.weights["block_opponent_strategy_reward"] -= 0.1
 
         # 增加对关键位置的进攻权重
-        for piece in self.env.red_pieces:
+        for piece in self.env.get_pieces(own_color):
             if piece.get_position() and self.env.is_railway(piece.get_position()):
                 self.weights["aggressive_attack_reward"] += 0.2
             else:
@@ -355,22 +359,33 @@ class DQNAgent:
             if key not in self.weights:
                 self.weights[key] = 1.0  # 或者其他合理的初始值
 
-
-    def get_prob_matrix(self, state):
+    def get_prob_matrix(self, state, player_color):
         prob_matrix = np.zeros((self.env.board_rows, self.env.board_cols))
-        for piece in self.env.red_pieces:
+        
+        # 确定当前玩家和对手的棋子颜色
+        own_color = player_color
+        opponent_color = 'blue' if player_color == 'red' else 'red'
+        
+        for piece in self.env.get_pieces(own_color):
             if piece.position:
                 x, y = piece.position
                 prob_matrix[x, y] = self.env.piece_name_to_value(piece.get_name())
+                
+        for piece in self.env.get_pieces(opponent_color):
+            if piece.position:
+                x, y = piece.position
+                prob_matrix[x, y] = -self.env.piece_name_to_value(piece.get_name())  # 对手的棋子用负值表示
+        
         return prob_matrix
+
             
     def act(self, state, turn, num_own_pieces, num_opponent_pieces, features, player_color):
-        self.adjust_weights(state)
+        self.adjust_weights(state, player_color=player_color)
         self.pomcp.update_weights(self.weights)
         state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).to(self.device)  # 调整维度
         state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)  # 确保是 (1, 3, board_rows, board_cols)
 
-        prob_matrix = self.get_prob_matrix(state)
+        prob_matrix = self.get_prob_matrix(state, player_color=player_color)
         prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.device)
         turn_tensor = torch.FloatTensor([turn]).unsqueeze(0).to(self.device)
         num_own_pieces_tensor = torch.FloatTensor([num_own_pieces]).unsqueeze(0).to(self.device)

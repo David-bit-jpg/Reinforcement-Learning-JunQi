@@ -1162,3 +1162,11 @@ class JunQiEnvGame(gym.Env):
                 ax2.text(x, y, piece.get_name(), ha='center', va='center', fontsize=12, color=color, bbox=dict(facecolor='white', edgecolor=color, boxstyle='round,pad=0.3'), fontproperties=font_prop)
 
         plt.show()
+        
+    def get_pieces(self, color):
+        if color == 'red':
+            return self.red_pieces
+        elif color == 'blue':
+            return self.blue_pieces
+        else:
+            raise ValueError("Invalid color")

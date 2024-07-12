@@ -798,6 +798,14 @@ class JunQiEnvGame(gym.Env):
 
     def is_railway(self, position):
         return position in self.railways
+    
+    def get_pieces(self, color):
+        if color == 'red':
+            return self.red_pieces
+        elif color == 'blue':
+            return self.blue_pieces
+        else:
+            raise ValueError("Invalid color")
 
     def is_terminal_state(self, state):
         """
