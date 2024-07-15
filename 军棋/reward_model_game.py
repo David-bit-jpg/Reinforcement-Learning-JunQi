@@ -37,6 +37,7 @@ class RewardModel:
         self.total_reward += reward
         return reward
 
+
     def _is_special_move(self, piece, target_position, outcome):
         # 判断是否为特殊动作
         if piece.get_name() in ['工兵', '司令', '军长', '师长']:
@@ -377,4 +378,43 @@ class RewardModel:
         opponent_piece = self.env.get_piece_at_position(target_position)
         if opponent_piece and opponent_piece.get_color() != piece.get_color():
             reward += 10  # 主动进攻的奖励
+        return reward
+    
+    def _calculate_defense_strategy_reward(self, piece, target_position, weights):
+        reward = 0
+        flag_position = self.env.get_flag_position(piece.get_color())
+        if flag_position:
+            distance = self.get_manhattan_distance(target_position, flag_position)
+            reward += 10 / max(distance, 1)
+
+        if self.env.is_in_camp(target_position) and not self.env.get_piece_at_position(target_position):
+            reward += self.get_camp_reward(target_position, piece.get_color())
+
+        opponent_color = 'red' if piece.get_color() == 'blue' else 'blue'
+        for camp in self.env.get_camps():
+            occupant = self.env.get_piece_at_position(camp)
+            if occupant and occupant.get_color() == opponent_color:
+                reward -= self.get_camp_penalty(camp, piece.get_color())
+
+        reward += self._calculate_guarding_reward(piece, target_position)
+
+        # 新增对行营保护的奖励计算
+        reward += self._calculate_protect_camps_reward(piece, target_position)
+
+        return reward
+
+    def _calculate_protect_camps_reward(self, piece, target_position):
+        reward = 0
+        own_color = piece.get_color()
+        opponent_color = 'red' if own_color == 'blue' else 'blue'
+        opponent_pieces = self.env.get_pieces(opponent_color)
+
+        for camp in self.env.get_camps():
+            if self.env.get_piece_at_position(camp) is None:
+                for opponent_piece in opponent_pieces:
+                    if opponent_piece.get_position() and target_position in self.env.get_valid_moves(opponent_piece):
+                        if camp in self.env.get_valid_moves(opponent_piece):
+                            # 如果对方棋子能在下一步占领行营，给予更高的奖励以优先占据行营
+                            reward += 5
+                            break
         return reward
