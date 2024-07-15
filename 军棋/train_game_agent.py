@@ -109,12 +109,12 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
 
                 # 每100步可视化推理棋盘
                 # if t % 100 == 0:
-                env_model.visualize_inferred_board(player_color=current_player)
+                # env_model.visualize_inferred_board(player_color=current_player)
                 # 检查是否有战斗发生并记录战斗信息
                 if 'battle_info' in info:
                     battle_info = info['battle_info']
                     last_move = (current_agent.get_piece_by_index(action // (env_model.board_rows * env_model.board_cols)), (action // env_model.board_cols % env_model.board_rows, action % env_model.board_cols), next_state)
-                    env_model.visualize_full_board(last_move=last_move, battle_info=battle_info)
+                    # env_model.visualize_full_board(last_move=last_move, battle_info=battle_info)
                     battle_info = None  # 重置战斗信息
 
                 # 检查是否有玩家获胜
