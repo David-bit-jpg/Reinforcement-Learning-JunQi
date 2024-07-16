@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import copy
 import torch
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda")
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
 

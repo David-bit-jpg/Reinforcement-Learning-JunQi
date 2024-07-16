@@ -8,8 +8,7 @@ from collections import deque, namedtuple
 import logging
 import copy
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+device = torch.device("cuda")
 # 编码棋子特征
 piece_encoding = {
     '地雷': 1,
@@ -71,12 +70,12 @@ class PolicyValueNet(nn.Module):
             prob_matrix = prob_matrix.unsqueeze(1)  # 增加一个维度以符合卷积层输入要求
 
         prob_matrix = F.relu(self.prob_bn(self.prob_conv(prob_matrix)))  # 修正这一行
-        prob_matrix = prob_matrix.reshape(prob_matrix.size(0), -1)  # 使用 .reshape() 而不是 .view()
+        prob_matrix = prob_matrix.reshape(prob_matrix.size(0), -1)
 
-        turn = turn.reshape(turn.size(0), -1)  # 使用 .reshape() 而不是 .view()
-        num_own_pieces = num_own_pieces.reshape(num_own_pieces.size(0), -1)  # 使用 .reshape() 而不是 .view()
-        num_opponent_pieces = num_opponent_pieces.reshape(num_opponent_pieces.size(0), -1)  # 使用 .reshape() 而不是 .view()
-        features = features.reshape(features.size(0), -1)  # 使用 .reshape() 而不是 .view()
+        turn = turn.reshape(turn.size(0), -1)
+        num_own_pieces = num_own_pieces.reshape(num_own_pieces.size(0), -1)
+        num_opponent_pieces = num_opponent_pieces.reshape(num_opponent_pieces.size(0), -1)
+        features = features.reshape(features.size(0), -1)
 
         combined = torch.cat([board_state, prob_matrix, turn, num_own_pieces, num_opponent_pieces, features], dim=1)
 
@@ -103,8 +102,8 @@ class POMCP:
         self.env = env
         self.num_simulations = num_simulations
         self.weights = weights
-        self.agent = agent  # 新增
-        self.gamma = gamma  # 初始折扣因子
+        self.agent = agent 
+        self.gamma = gamma 
 
     def update_weights(self, weights):
         self.weights = weights
@@ -118,7 +117,7 @@ class POMCP:
         env_copy = copy.deepcopy(self.env)
         env_copy.set_state(state)
 
-        max_simulation_depth = 30  # 初始模拟深度
+        max_simulation_depth = 40  # 初始模拟深度
         if len(env_copy.red_pieces) + len(env_copy.blue_pieces) < 20:
             max_simulation_depth = 50  # 棋子较少时增加模拟深度
         elif len(env_copy.red_pieces) + len(env_copy.blue_pieces) < 10:
@@ -139,7 +138,7 @@ class POMCP:
             # 使用策略价值网络估计当前状态的价值
             state_tensor = torch.FloatTensor(next_state).unsqueeze(0).unsqueeze(0).to(self.agent.device)
             state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)
-            prob_matrix = self.agent.get_prob_matrix(next_state, player_color)  # 使用agent调用
+            prob_matrix = self.agent.get_prob_matrix(next_state, player_color)
             prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.agent.device)
             turn_tensor = torch.FloatTensor([env_copy.turn]).unsqueeze(0).to(self.agent.device)
             num_own_pieces_tensor = torch.FloatTensor([len(env_copy.red_pieces)]).unsqueeze(0).to(self.agent.device)
@@ -174,7 +173,7 @@ class POMCP:
         # 使用策略价值网络估计当前状态的价值
         state_tensor = torch.FloatTensor(next_state).unsqueeze(0).unsqueeze(0).to(self.agent.device)
         state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)
-        prob_matrix = self.agent.get_prob_matrix(next_state, player_color)  # 使用agent调用
+        prob_matrix = self.agent.get_prob_matrix(next_state, player_color)
         prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.agent.device)
         turn_tensor = torch.FloatTensor([env_copy.turn]).unsqueeze(0).to(self.agent.device)
         num_own_pieces_tensor = torch.FloatTensor([len(env_copy.red_pieces)]).unsqueeze(0).to(self.agent.device)
@@ -202,10 +201,18 @@ class DQNAgent:
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda")
+        
         self.qnetwork_local = DuelingQNetwork(self.state_size, action_size, seed).to(self.device)
         self.qnetwork_target = DuelingQNetwork(self.state_size, action_size, seed).to(self.device)
         self.policy_value_net = PolicyValueNet(board_size=13, num_features=5, hidden_size=128).to(self.device)
+        
+        if torch.cuda.device_count() > 1:
+            print(f"Using {torch.cuda.device_count()} GPUs!")
+            self.qnetwork_local = nn.DataParallel(self.qnetwork_local)
+            self.qnetwork_target = nn.DataParallel(self.qnetwork_target)
+            self.policy_value_net = nn.DataParallel(self.policy_value_net)
+
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
         self.policy_value_optimizer = optim.Adam(self.policy_value_net.parameters(), lr=lr)
 

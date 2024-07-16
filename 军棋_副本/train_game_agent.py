@@ -10,6 +10,15 @@ from junqi_env_game_model import JunQiEnvGame as JunQiEnvGameSetModel
 from dqn_agent_setup import DQNAgent as DQNAgentSetUp
 from junqi_env_setup import JunQiEnvSetUp
 from tqdm import tqdm
+if torch.cuda.is_available():
+    print("CUDA is available. The model will utilize GPUs.")
+else:
+    print("CUDA is not available. The model will run on CPU.")
+    
+    
+print("CUDA is available: ", torch.cuda.is_available())
+print("Current device: ", torch.cuda.current_device())
+print("Device name: ", torch.cuda.get_device_name(torch.cuda.current_device()))
 
 # 确保模型保存的目录存在
 MODEL_SAVE_PATH = "/code/军棋/models/game_model.pth"
@@ -26,6 +35,7 @@ agent_setup.qnetwork_local.load_state_dict(torch.load('/code/军棋/models/setup
 
 # 设置模型为评估模式
 agent_setup.qnetwork_local.eval()
+agent_setup.qnetwork_local.cuda()
 
 def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
     while True:
@@ -53,13 +63,32 @@ red_pieces = env_setup.red_pieces
 blue_pieces = env_setup.blue_pieces
 
 # 初始化环境和智能体
-initial_board = [red_pieces, blue_pieces]  # 初始化棋盘
+initial_board = [red_pieces, blue_pieces]
 env_model = JunQiEnvGameModel(initial_board, input_size=13 * 5 * 4, hidden_size=128, output_size=65, lr=0.001)
 env_setmodel = JunQiEnvGameSetModel(initial_board, input_size=13 * 5 * 4, hidden_size=128, output_size=65, lr=0.001)
 state_size = env_model.get_state_size()
 action_size = len(env_model.red_pieces) * env_model.board_rows * env_model.board_cols
 agent_red = DQNAgent(state_size, action_size, env_model, seed=0)
 agent_blue = DQNAgent(state_size, action_size, env_setmodel, seed=1)
+
+device = torch.device("cuda")
+
+if torch.cuda.device_count() > 1:
+    print(f"Using {torch.cuda.device_count()} GPUs!")
+    agent_red.qnetwork_local = torch.nn.DataParallel(agent_red.qnetwork_local)
+    agent_red.qnetwork_target = torch.nn.DataParallel(agent_red.qnetwork_target)
+    agent_blue.qnetwork_local = torch.nn.DataParallel(agent_blue.qnetwork_local)
+    agent_blue.qnetwork_target = torch.nn.DataParallel(agent_blue.qnetwork_target)
+
+agent_red.qnetwork_local = agent_red.qnetwork_local.to(device)
+agent_red.qnetwork_target = agent_red.qnetwork_target.to(device)
+agent_blue.qnetwork_local = agent_blue.qnetwork_local.to(device)
+agent_blue.qnetwork_target = agent_blue.qnetwork_target.to(device)
+agent_red.qnetwork_local.cuda()
+agent_red.qnetwork_target.cuda()
+agent_blue.qnetwork_local.cuda()
+agent_blue.qnetwork_target.cuda()
+
 
 def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay):
     scores = []
@@ -155,8 +184,8 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
     return agent_red, agent_blue
 
 # 训练代理
-num_episodes = 10000
-max_t = 1000
+num_episodes = 500
+max_t = 50
 epsilon_start = 1.0
 epsilon_end = 0.01
 epsilon_decay = 0.995

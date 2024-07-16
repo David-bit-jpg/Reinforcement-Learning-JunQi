@@ -14,9 +14,13 @@ import copy
 import torch
 from dqn_agent_infer import DQNAgent as DQNAgentInfer
 from dqn_agent_infer import DoubleDQN
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda")
 font_path = '/System/Library/Fonts/PingFang.ttc'
 font_prop = fm.FontProperties(fname=font_path)
+if torch.cuda.is_available():
+    print("CUDA is available. The model will utilize GPU.")
+else:
+    print("CUDA is not available. The model will run on CPU.")
 
 piece_encoding = {
     '地雷': 1,
@@ -68,11 +72,13 @@ class JunQiEnvGame(gym.Env):
         model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys()))
         model.load_state_dict(torch.load(model_path))
         model.eval()
+        model.cuda()
         
         # 定义目标模型
         target_model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys()))
         target_model.load_state_dict(model.state_dict())
         target_model.eval()
+        target_model.cuda()
         
         # 创建 DQNAgent 实例
         action_size = len(self.red_pieces) * self.board_rows * self.board_cols

@@ -5,6 +5,9 @@ import torch.nn.functional as F
 import numpy as np
 import random
 from junqi_env_infer import JunQiEnvInfer
+
+device = torch.device("cuda")
+
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super(ResidualBlock, self).__init__()
@@ -12,7 +15,6 @@ class ResidualBlock(nn.Module):
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
-
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
@@ -33,19 +35,17 @@ class DoubleDQN(nn.Module):
         self.board_rows = board_rows
         self.board_cols = board_cols
         self.piece_types = piece_types
-
         self.conv1 = nn.Conv2d(4, 128, kernel_size=3, stride=1, padding=1)
         self.res_block1 = ResidualBlock(128, 128)
         self.res_block2 = ResidualBlock(128, 256)
         self.res_block3 = ResidualBlock(256, 512)
-
-        temp_input = torch.zeros(1, 4, board_rows, board_cols)
+        temp_input = torch.zeros(1, 4, board_rows, board_cols).to(device)
         temp_output = self._forward_conv(temp_input)
-        conv_output_size = temp_output.reshape(1, -1).size(1)
-
+        conv_output_size = temp_output.view(1, -1).size(1)
         self.fc1 = nn.Linear(conv_output_size, 2048)
         self.fc2 = nn.Linear(2048, 1024)
         self.fc3 = nn.Linear(1024, len(piece_types))
+        self.to(device)
 
     def _forward_conv(self, x):
         x = F.relu(self.conv1(x))
@@ -56,24 +56,16 @@ class DoubleDQN(nn.Module):
 
     def forward(self, x):
         x = self._forward_conv(x)
-
-        x = x.reshape(x.size(0), -1)
-        expected_size = self.fc1.in_features
-        actual_size = x.size(1)
-        if actual_size < expected_size:
-            padding = torch.zeros((x.size(0), expected_size - actual_size), device=x.device)
-            x = torch.cat((x, padding), dim=1)
-        elif actual_size > expected_size:
-            x = x[:, :expected_size]
-
+        x = x.view(x.size(0), -1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
+
 class DQNAgent:
     def __init__(self, model, target_model, action_size, initial_board, memory_capacity=10000, learning_rate=0.001, gamma=0.95, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
-        self.model = model
-        self.target_model = target_model
+        self.model = model.to(device)
+        self.target_model = target_model.to(device)
         self.action_size = action_size
         self.gamma = gamma
         self.epsilon = epsilon
@@ -100,7 +92,7 @@ class DQNAgent:
             next_state, reward, done, _ = env.step(action)
             self.remember(state, action, reward, next_state, done)
             state = next_state if not done else env.reset()
-            
+
     def act(self, state):
         board_state = state['board_state']
         move_history = state['move_history']
@@ -121,8 +113,8 @@ class DQNAgent:
         inferred_pieces = {}
         for pos in opponent_positions:
             input_data = self.prepare_input(board_state, move_history, battle_history, opponent_commander_dead, pos)
-            input_tensor = torch.tensor(input_data, dtype=torch.float32).unsqueeze(0)
-            output = self.model(input_tensor).detach().numpy()
+            input_tensor = torch.tensor(input_data, dtype=torch.float32).unsqueeze(0).to(device)
+            output = self.model(input_tensor).detach().cpu().numpy()
             piece_type_idx = np.argmax(output)
 
             # 确保 piece_type_idx 在有效范围内
@@ -143,7 +135,7 @@ class DQNAgent:
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size), inferred_pieces
 
-        state_tensor = torch.tensor(board_state, dtype=torch.float32).unsqueeze(0)
+        state_tensor = torch.tensor(board_state, dtype=torch.float32).unsqueeze(0).to(device)
 
         # 动态调整输入形状以匹配模型预期形状
         if state_tensor.shape[1] != 4:
@@ -158,7 +150,7 @@ class DQNAgent:
 
         act_values = self.model(state_tensor)
         return torch.argmax(act_values[0]).item(), inferred_pieces
-    
+
     def prepare_input(self, board_state, move_history, battle_history, opponent_commander_dead, pos):
         x, y = pos
         input_data = np.zeros((4, self.model.board_rows, self.model.board_cols))
@@ -213,11 +205,11 @@ class DQNAgent:
         next_states = np.array([self.get_board_state(x[3]) for x in minibatch])
         dones = np.array([x[4] for x in minibatch])
 
-        states = torch.tensor(states, dtype=torch.float32)
-        next_states = torch.tensor(next_states, dtype=torch.float32)
-        actions = torch.tensor(actions, dtype=torch.int64)
-        rewards = torch.tensor(rewards, dtype=torch.float32)
-        dones = torch.tensor(dones, dtype=torch.float32)
+        states = torch.tensor(states, dtype=torch.float32).to(device)
+        next_states = torch.tensor(next_states, dtype=torch.float32).to(device)
+        actions = torch.tensor(actions, dtype=torch.int64).to(device)
+        rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
+        dones = torch.tensor(dones, dtype=torch.float32).to(device)
 
         actions = torch.clamp(actions, 0, self.model.fc3.out_features - 1)
 
@@ -225,21 +217,20 @@ class DQNAgent:
         next_q_values = self.target_model(next_states).max(1)[0]
         expected_q_values = rewards + (self.gamma * next_q_values * (1 - dones))
 
-        loss = (q_values - expected_q_values.detach()).pow(2) * torch.tensor(ISWeights, dtype=torch.float32)
+        loss = (q_values - expected_q_values.detach()).pow(2) * torch.tensor(ISWeights, dtype=torch.float32).to(device)
         loss = loss.mean()
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-        abs_errors = torch.abs(q_values - expected_q_values).detach().numpy()
+        abs_errors = torch.abs(q_values - expected_q_values).detach().cpu().numpy()
         self.memory.batch_update(tree_idx, abs_errors)
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
         return loss.item()  # 确保返回损失值
-
 
     def load(self, name):
         self.model.load_state_dict(torch.load(name))
@@ -249,25 +240,23 @@ class DQNAgent:
 
     def get_board_state(self, state_dict):
         board_state = state_dict['board_state']
-        
+
         if len(board_state.shape) == 4 and board_state.shape[0] == 1:
             board_state = board_state[0]
-        
+
         if len(board_state.shape) != 3:
             raise ValueError(f"Expected board_state to be a 3D array, but got shape: {board_state.shape}")
-        
+
         transposed_state = np.transpose(board_state, (2, 0, 1))
-        
+
         if transposed_state.shape[0] > 4:
             transposed_state = transposed_state[:4, :, :]
         elif transposed_state.shape[0] < 4:
             padded_state = np.zeros((4, transposed_state.shape[1], transposed_state.shape[2]))
             padded_state[:transposed_state.shape[0], :, :] = transposed_state
             transposed_state = padded_state
-            
-        return transposed_state
 
-import numpy as np
+        return transposed_state
 
 class SumTree:
     def __init__(self, capacity):

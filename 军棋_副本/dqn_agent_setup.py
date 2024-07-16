@@ -4,9 +4,7 @@ import torch.optim as optim
 import numpy as np
 import random
 from collections import deque, namedtuple
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+device = torch.device("cuda")
 # 编码棋子特征
 piece_encoding = {
     '军旗': 0,
