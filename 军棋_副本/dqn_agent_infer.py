@@ -61,7 +61,6 @@ class DoubleDQN(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
-
 class DQNAgent:
     def __init__(self, model, target_model, action_size, initial_board, memory_capacity=10000, learning_rate=0.001, gamma=0.95, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
         self.model = model.to(device)
@@ -102,29 +101,23 @@ class DQNAgent:
 
         opponent_color = 'blue' if agent_color == 'red' else 'red'
 
-        # 提取对方棋子的位置
         opponent_positions = []
         for x in range(self.model.board_rows):
             for y in range(self.model.board_cols):
                 if np.any(board_state[x, y, :len(self.model.piece_types)] != 0):
                     opponent_positions.append((x, y))
 
-        # 根据对方棋子的位置创建矩阵，推断对方棋子的可能类型
         inferred_pieces = {}
         for pos in opponent_positions:
             input_data = self.prepare_input(board_state, move_history, battle_history, opponent_commander_dead, pos)
             input_tensor = torch.tensor(input_data, dtype=torch.float32).unsqueeze(0).to(device)
             output = self.model(input_tensor).detach().cpu().numpy()
             piece_type_idx = np.argmax(output)
-
-            # 确保 piece_type_idx 在有效范围内
             if piece_type_idx >= len(self.model.piece_types):
                 piece_type_idx = len(self.model.piece_types) - 1
-
             inferred_pieces[pos] = self.model.piece_types[piece_type_idx]
 
         if opponent_commander_dead:
-            # 明确军旗的位置
             if opponent_color == 'red':
                 flag_positions = [(12, 1), (12, 3)]
             else:
@@ -136,15 +129,11 @@ class DQNAgent:
             return random.randrange(self.action_size), inferred_pieces
 
         state_tensor = torch.tensor(board_state, dtype=torch.float32).unsqueeze(0).to(device)
-
-        # 动态调整输入形状以匹配模型预期形状
         if state_tensor.shape[1] != 4:
-            # 计算新的形状
             num_channels = state_tensor.shape[1]
             if num_channels > 4:
-                state_tensor = state_tensor[:, :4, :, :]  # 如果通道数大于4，则截取前4个通道
+                state_tensor = state_tensor[:, :4, :, :]
             else:
-                # 如果通道数少于4，则填充0使其达到4个通道
                 padding = torch.zeros((state_tensor.shape[0], 4 - num_channels, state_tensor.shape[2], state_tensor.shape[3]), device=state_tensor.device)
                 state_tensor = torch.cat((state_tensor, padding), dim=1)
 
@@ -154,16 +143,11 @@ class DQNAgent:
     def prepare_input(self, board_state, move_history, battle_history, opponent_commander_dead, pos):
         x, y = pos
         input_data = np.zeros((4, self.model.board_rows, self.model.board_cols))
-
         input_data[0] = board_state[:, :, :len(self.model.piece_types)].sum(axis=2)
-
-        # 记录自己的移动历史
         for move in move_history:
             start_pos, _, end_pos = move
             if end_pos == pos:
                 input_data[1, start_pos[0], start_pos[1]] += 1
-
-        # 更新战斗历史以排除不可能的棋子类型
         for battle in battle_history:
             attacker_piece, attacker_pos, defender_piece, defender_pos, result = battle
             if defender_pos == pos:
@@ -171,25 +155,19 @@ class DQNAgent:
                     input_data[2, attacker_pos[0], attacker_pos[1]] += 1
                 elif result == 'lose':
                     input_data[2, attacker_pos[0], attacker_pos[1]] -= 1
-
-        # 检查是否有可能的炸弹或地雷
         if self.is_possible_bomb(battle_history, pos):
-            input_data[3, x, y] = 1  # 标记为可能的炸弹
+            input_data[3, x, y] = 1
         elif self.is_possible_mine(move_history, pos):
-            input_data[3, x, y] = 2  # 标记为可能的地雷
-
+            input_data[3, x, y] = 2
         if opponent_commander_dead:
             input_data[3, :, :] = 1
-
         return input_data
 
     def is_possible_bomb(self, battle_history, pos):
-        # 如果一个棋子周围有很多战斗历史记录，那么这个棋子可能是炸弹
         battle_count = sum(1 for battle in battle_history if battle[3] == pos or battle[1] == pos)
-        return battle_count > 3  # 可根据需要调整阈值
+        return battle_count > 3
 
     def is_possible_mine(self, move_history, pos):
-        # 如果一个棋子位于后两排且没有移动历史记录，那么这个棋子可能是地雷
         if pos[0] >= self.model.board_rows - 2:
             move_count = sum(1 for move in move_history if move[2] == pos)
             return move_count == 0
@@ -210,7 +188,6 @@ class DQNAgent:
         actions = torch.tensor(actions, dtype=torch.int64).to(device)
         rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
         dones = torch.tensor(dones, dtype=torch.float32).to(device)
-
         actions = torch.clamp(actions, 0, self.model.fc3.out_features - 1)
 
         q_values = self.model(states).gather(1, actions.unsqueeze(-1)).squeeze(-1)
@@ -230,7 +207,7 @@ class DQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-        return loss.item()  # 确保返回损失值
+        return loss.item()
 
     def load(self, name):
         self.model.load_state_dict(torch.load(name))
@@ -240,23 +217,19 @@ class DQNAgent:
 
     def get_board_state(self, state_dict):
         board_state = state_dict['board_state']
-
         if len(board_state.shape) == 4 and board_state.shape[0] == 1:
             board_state = board_state[0]
-
         if len(board_state.shape) != 3:
             raise ValueError(f"Expected board_state to be a 3D array, but got shape: {board_state.shape}")
-
         transposed_state = np.transpose(board_state, (2, 0, 1))
-
         if transposed_state.shape[0] > 4:
-            transposed_state = transposed_state[:4, :, :]
+            transposed_state = transposed_state[:4, :]
         elif transposed_state.shape[0] < 4:
             padded_state = np.zeros((4, transposed_state.shape[1], transposed_state.shape[2]))
             padded_state[:transposed_state.shape[0], :, :] = transposed_state
             transposed_state = padded_state
-
         return transposed_state
+
 
 class SumTree:
     def __init__(self, capacity):

@@ -4,7 +4,9 @@ import torch.optim as optim
 import numpy as np
 import random
 from collections import deque, namedtuple
+
 device = torch.device("cuda")
+
 # 编码棋子特征
 piece_encoding = {
     '军旗': 0,
@@ -55,10 +57,11 @@ class NoisyLinear(nn.Module):
 
     def forward(self, x):
         if self.training:
-            return nn.functional.linear(x, self.weight_mu + self.weight_sigma * self.weight_epsilon,
-                                           self.bias_mu + self.bias_sigma * self.bias_epsilon)
+            return nn.functional.linear(x.to(device), 
+                                        self.weight_mu + self.weight_sigma * self.weight_epsilon,
+                                        self.bias_mu + self.bias_sigma * self.bias_epsilon)
         else:
-            return nn.functional.linear(x, self.weight_mu, self.bias_mu)
+            return nn.functional.linear(x.to(device), self.weight_mu, self.bias_mu)
 
     def scale_noise(self, size):
         x = torch.randn(size)
@@ -79,6 +82,7 @@ class DuelingQNetwork(nn.Module):
         self.fc4_val = NoisyLinear(128, 1)
 
     def forward(self, state):
+        state = state.to(device)
         x = torch.relu(self.fc1(state))
         x = torch.relu(self.fc2(x))
         

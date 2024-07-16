@@ -10,12 +10,12 @@ from junqi_env_game_model import JunQiEnvGame as JunQiEnvGameSetModel
 from dqn_agent_setup import DQNAgent as DQNAgentSetUp
 from junqi_env_setup import JunQiEnvSetUp
 from tqdm import tqdm
+device = torch.device("cuda")
 if torch.cuda.is_available():
     print("CUDA is available. The model will utilize GPUs.")
 else:
     print("CUDA is not available. The model will run on CPU.")
-    
-    
+
 print("CUDA is available: ", torch.cuda.is_available())
 print("Current device: ", torch.cuda.current_device())
 print("Device name: ", torch.cuda.get_device_name(torch.cuda.current_device()))
@@ -33,20 +33,22 @@ agent_setup = DQNAgentSetUp(state_size_setup, action_size_setup, env_setup, seed
 # 加载训练好的模型权重
 agent_setup.qnetwork_local.load_state_dict(torch.load('/code/军棋/models/setup_model.pth'))
 
-# 设置模型为评估模式
+# 设置模型为评估模式并移动到GPU
 agent_setup.qnetwork_local.eval()
-agent_setup.qnetwork_local.cuda()
+agent_setup.qnetwork_local.to(device)
 
 def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
     while True:
         state = env.reset()
         state = state.flatten()
+        state = torch.tensor(state, dtype=torch.float32).to(device)
         for t in range(max_t):
             action = agent.act(state, epsilon)  # 调用时传递 epsilon 参数
             if action is None:
                 break
             next_state, reward, done, _ = env.step(action)
             next_state = next_state.flatten()
+            next_state = torch.tensor(next_state, dtype=torch.float32).to(device)
             state = next_state
             if done:
                 break
@@ -84,11 +86,6 @@ agent_red.qnetwork_local = agent_red.qnetwork_local.to(device)
 agent_red.qnetwork_target = agent_red.qnetwork_target.to(device)
 agent_blue.qnetwork_local = agent_blue.qnetwork_local.to(device)
 agent_blue.qnetwork_target = agent_blue.qnetwork_target.to(device)
-agent_red.qnetwork_local.cuda()
-agent_red.qnetwork_target.cuda()
-agent_blue.qnetwork_local.cuda()
-agent_blue.qnetwork_target.cuda()
-
 
 def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay):
     scores = []
@@ -101,6 +98,7 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
     for episode in range(num_episodes):
         state = env_model.reset()
         state = state.flatten()
+        state = torch.tensor(state, dtype=torch.float32).to(device)
         score = 0
         current_player = 'red'
         current_agent = agent_red
@@ -119,8 +117,9 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
                     break
 
                 next_state, reward, done, info = env_model.step(action, pi, pi_reg, current_player, current_agent.get_weights())
-                current_agent.step(state.flatten(), action, reward, next_state.flatten(), done)
+                current_agent.step(state, action, reward, next_state, done)
                 state = next_state.flatten()
+                state = torch.tensor(state, dtype=torch.float32).to(device)
                 score += reward
 
                 # 记录动作
@@ -191,4 +190,4 @@ epsilon_end = 0.01
 epsilon_decay = 0.995
 trained_agent_red, trained_agent_blue = train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay)
 torch.save(trained_agent_red.qnetwork_local.state_dict(), '/code/军棋/models/game_agent_with_inference_model.pth')
-torch.save(trained_agent_blue.qnetwork_local.state_dict(), '/code/军棋/models/game_agent_without_inference_moel.pth')
+torch.save(trained_agent_blue.qnetwork_local.state_dict(), '/code/军棋/models/game_agent_without_inference_model.pth')

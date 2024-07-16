@@ -36,7 +36,6 @@ piece_encoding = {
     '工兵': 11,
     '军旗': 12,
 }
-
 class JunQiEnvGame(gym.Env):
     metadata = {'render.modes': ['human']}
     
@@ -66,19 +65,17 @@ class JunQiEnvGame(gym.Env):
         self.blue_commander_dead = False
 
         self.reset()
-
+        
     def load_inference_model(self, model_path):
         # 定义推理模型的架构和初始化
-        model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys()))
+        model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys())).to(device)
         model.load_state_dict(torch.load(model_path))
         model.eval()
-        model.cuda()
         
         # 定义目标模型
-        target_model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys()))
+        target_model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys())).to(device)
         target_model.load_state_dict(model.state_dict())
         target_model.eval()
-        target_model.cuda()
         
         # 创建 DQNAgent 实例
         action_size = len(self.red_pieces) * self.board_rows * self.board_cols
@@ -194,8 +191,8 @@ class JunQiEnvGame(gym.Env):
             board_state = np.expand_dims(board_state, axis=0)
 
         # 转换为tensor输入并调整形状
-        input_tensor = torch.tensor(board_state, dtype=torch.float32).permute(0, 3, 1, 2)
-        output = self.model.model(input_tensor).detach().numpy()  # 调用模型的forward方法
+        input_tensor = torch.tensor(board_state, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+        output = self.model.model(input_tensor).detach().cpu().numpy()  # 调用模型的forward方法
 
         inferred_pieces = {}
         opponent_color = 'blue' if current_player_color == 'red' else 'red'
