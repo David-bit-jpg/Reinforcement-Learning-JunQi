@@ -40,6 +40,7 @@ class DuelingQNetwork(nn.Module):
         value = self.fc3_value(x)
         advantage = self.fc3_advantage(x)
         return value + advantage - advantage.mean()
+
 class PolicyValueNet(nn.Module):
     def __init__(self, board_size=13, num_features=5, hidden_size=128):
         super(PolicyValueNet, self).__init__()
@@ -97,6 +98,7 @@ class PolicyValueNet(nn.Module):
 import copy
 import random
 import torch
+
 class POMCP:
     def __init__(self, env, weights, num_simulations, agent, gamma=0.99):
         self.env = env
@@ -186,6 +188,7 @@ class POMCP:
         # 计算综合评估值（折扣后的奖励 + 折扣后的价值估计）
         current_gamma = self.gamma ** depth
         return reward + current_gamma * value_estimation.item()
+
 class DQNAgent:
     def __init__(self, state_size, action_size, env, seed, gamma=0.99, lr=0.001, buffer_size=50000, batch_size=64, update_every=4, tau=0.001, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995):
         self.state_size = state_size
@@ -385,14 +388,15 @@ class DQNAgent:
         
         return prob_matrix
 
-            
     def act(self, state, turn, num_own_pieces, num_opponent_pieces, features, player_color):
         self.adjust_weights(state, player_color=player_color)
         self.pomcp.update_weights(self.weights)
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).to(self.device)  # 调整维度
+        
+        # 确保 state 在 GPU 上，然后将其移动到 CPU 再转换为 numpy 数组
+        state_tensor = torch.FloatTensor(state.cpu().numpy()).unsqueeze(0).unsqueeze(0).to(self.device)
         state_tensor = state_tensor.reshape(1, 3, self.env.board_rows, self.env.board_cols)  # 确保是 (1, 3, board_rows, board_cols)
 
-        prob_matrix = self.get_prob_matrix(state, player_color=player_color)
+        prob_matrix = self.get_prob_matrix(state.cpu().numpy(), player_color=player_color)  # 需要使用 numpy 数组来生成 prob_matrix
         prob_matrix_tensor = torch.FloatTensor(prob_matrix).unsqueeze(0).unsqueeze(0).to(self.device)
         turn_tensor = torch.FloatTensor([turn]).unsqueeze(0).to(self.device)
         num_own_pieces_tensor = torch.FloatTensor([num_own_pieces]).unsqueeze(0).to(self.device)
@@ -495,8 +499,6 @@ class DQNAgent:
         policy_loss.backward()
         self.policy_value_optimizer.step()
 
-
-
     def replicator_dynamics_update(self, pi, q_values, learning_rate=0.01):
         if len(pi) != len(q_values):
             min_len = min(len(pi), len(q_values))
@@ -512,7 +514,6 @@ class DQNAgent:
         selected_log_probs = rewards * log_probs[np.arange(len(actions)), actions]
         loss = -selected_log_probs.mean()
         return loss
-
 
     def soft_update(self, local_model, target_model, tau):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):

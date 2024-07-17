@@ -61,3 +61,4 @@ my-local-image-latest/356a75e09d0b51e1824372bd033cfa9b770f11cf1d78b11995ae3ace52
 my-local-image-latest/356a75e09d0b51e1824372bd033cfa9b770f11cf1d78b11995ae3ace52d0baa2/json
 my-local-image-latest.tar
 军棋.zip
+军棋_gpu/models/infer_model.pth

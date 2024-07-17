@@ -6,7 +6,7 @@ import numpy as np
 import random
 from junqi_env_infer import JunQiEnvInfer
 
-device = torch.device("cuda")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
@@ -28,24 +28,22 @@ class ResidualBlock(nn.Module):
         out += self.shortcut(x)
         out = F.relu(out)
         return out
-
 class DoubleDQN(nn.Module):
     def __init__(self, board_rows, board_cols, piece_types):
         super(DoubleDQN, self).__init__()
         self.board_rows = board_rows
         self.board_cols = board_cols
         self.piece_types = piece_types
-        self.conv1 = nn.Conv2d(4, 128, kernel_size=3, stride=1, padding=1)
-        self.res_block1 = ResidualBlock(128, 128)
-        self.res_block2 = ResidualBlock(128, 256)
-        self.res_block3 = ResidualBlock(256, 512)
+        self.conv1 = nn.Conv2d(4, 128, kernel_size=3, stride=1, padding=1).to(device)
+        self.res_block1 = ResidualBlock(128, 128).to(device)
+        self.res_block2 = ResidualBlock(128, 256).to(device)
+        self.res_block3 = ResidualBlock(256, 512).to(device)
         temp_input = torch.zeros(1, 4, board_rows, board_cols).to(device)
         temp_output = self._forward_conv(temp_input)
         conv_output_size = temp_output.view(1, -1).size(1)
-        self.fc1 = nn.Linear(conv_output_size, 2048)
-        self.fc2 = nn.Linear(2048, 1024)
-        self.fc3 = nn.Linear(1024, len(piece_types))
-        self.to(device)
+        self.fc1 = nn.Linear(conv_output_size, 2048).to(device)
+        self.fc2 = nn.Linear(2048, 1024).to(device)
+        self.fc3 = nn.Linear(1024, len(piece_types)).to(device)
 
     def _forward_conv(self, x):
         x = F.relu(self.conv1(x))
@@ -56,11 +54,12 @@ class DoubleDQN(nn.Module):
 
     def forward(self, x):
         x = self._forward_conv(x)
-        x = x.view(x.size(0), -1)
+        x = x.reshape(x.size(0), -1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
+
 class DQNAgent:
     def __init__(self, model, target_model, action_size, initial_board, memory_capacity=10000, learning_rate=0.001, gamma=0.95, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
         self.model = model.to(device)
@@ -229,7 +228,6 @@ class DQNAgent:
             padded_state[:transposed_state.shape[0], :, :] = transposed_state
             transposed_state = padded_state
         return transposed_state
-
 
 class SumTree:
     def __init__(self, capacity):

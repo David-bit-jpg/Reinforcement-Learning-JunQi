@@ -43,7 +43,8 @@ def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
         state = state.flatten()
         state = torch.tensor(state, dtype=torch.float32).to(device)
         for t in range(max_t):
-            action = agent.act(state, epsilon)  # 调用时传递 epsilon 参数
+            state_cpu = state.cpu().numpy()  # 将 GPU tensor 移动到 CPU 并转换为 numpy 数组
+            action = agent.act(state_cpu, epsilon)  # 调用时传递 epsilon 参数
             if action is None:
                 break
             next_state, reward, done, _ = env.step(action)
@@ -58,6 +59,7 @@ def generate_deployment(env, agent, epsilon=0.1, max_t=1000):
         if all_pieces_placed:
             break
 
+
 # 生成布局
 generate_deployment(env_setup, agent_setup, epsilon=0.2)  # 调整 epsilon 值来控制随机性
 
@@ -71,7 +73,7 @@ env_setmodel = JunQiEnvGameSetModel(initial_board, input_size=13 * 5 * 4, hidden
 state_size = env_model.get_state_size()
 action_size = len(env_model.red_pieces) * env_model.board_rows * env_model.board_cols
 agent_red = DQNAgent(state_size, action_size, env_model, seed=0)
-agent_blue = DQNAgent(state_size, action_size, env_setmodel, seed=1)
+agent_blue = DQNAgent(state_size, action_size, env_model, seed=1)
 
 device = torch.device("cuda")
 
@@ -183,11 +185,11 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
     return agent_red, agent_blue
 
 # 训练代理
-num_episodes = 500
-max_t = 50
+num_episodes = 3000
+max_t = 100
 epsilon_start = 1.0
 epsilon_end = 0.01
 epsilon_decay = 0.995
+print("starting!!!!!!!!!!!!!")
 trained_agent_red, trained_agent_blue = train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay)
 torch.save(trained_agent_red.qnetwork_local.state_dict(), '/code/军棋/models/game_agent_with_inference_model.pth')
-torch.save(trained_agent_blue.qnetwork_local.state_dict(), '/code/军棋/models/game_agent_without_inference_model.pth')

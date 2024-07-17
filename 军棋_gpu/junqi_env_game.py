@@ -65,18 +65,20 @@ class JunQiEnvGame(gym.Env):
         self.blue_commander_dead = False
 
         self.reset()
-        
+            
     def load_inference_model(self, model_path):
         # 定义推理模型的架构和初始化
         model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys())).to(device)
-        model.load_state_dict(torch.load(model_path))
+        model.load_state_dict(torch.load(model_path, map_location=device))  # 确保权重加载到正确的设备上
+        model.to(device)  # 确保模型移动到GPU
         model.eval()
-        
+
         # 定义目标模型
         target_model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys())).to(device)
         target_model.load_state_dict(model.state_dict())
+        target_model.to(device)  # 确保目标模型移动到GPU
         target_model.eval()
-        
+
         # 创建 DQNAgent 实例
         action_size = len(self.red_pieces) * self.board_rows * self.board_cols
         agent = DQNAgentInfer(model=model, target_model=target_model, action_size=action_size, initial_board=self.initial_board)
