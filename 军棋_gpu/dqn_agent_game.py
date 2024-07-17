@@ -460,14 +460,17 @@ class DQNAgent:
             if len(self.memory) > self.batch_size:
                 experiences = self.memory.sample()
                 self.learn(experiences, self.gamma)
-
+                
     def learn(self, experiences, gamma):
         states, actions, rewards, next_states, dones, indices, weights = experiences
+
+        # Ensure actions is a 2D tensor
+        actions = actions.unsqueeze(1)
 
         Q_targets_next = self.qnetwork_target(next_states).detach().max(1)[0].unsqueeze(1)
         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
 
-        # 确保动作索引不超过当前Q网络的动作维度
+        # Ensure the actions tensor is of the same shape as the states tensor
         max_action_idx = self.qnetwork_local(states).size(1) - 1
         actions = torch.clamp(actions, 0, max_action_idx)
 
@@ -480,8 +483,9 @@ class DQNAgent:
         loss.backward()
         self.optimizer.step()
 
-        # 将 loss 转换为一维数组
-        self.memory.update_priorities(indices, loss.detach().cpu().numpy().reshape(-1))
+        # Update priorities in the replay buffer
+        abs_errors = torch.abs(Q_expected - Q_targets).detach().cpu().numpy()
+        self.memory.update_priorities(indices, abs_errors.reshape(-1))
 
         self.soft_update(self.qnetwork_local, self.qnetwork_target, self.tau)
 
@@ -493,11 +497,24 @@ class DQNAgent:
 
         self.pi = self.replicator_dynamics_update(self.pi, q_values.mean(axis=0))
 
-        # 策略更新
-        policy_loss = self.policy_loss(states, actions.squeeze(), rewards)
+        # Extract necessary state components for policy_value_net
+        prob_matrix = self.get_prob_matrix(states, player_color="red")  # Assumes "red" player, adjust as necessary
+        turn_tensor = torch.FloatTensor([self.env.turn]).unsqueeze(0).to(self.device)
+        num_own_pieces_tensor = torch.FloatTensor([len(self.env.red_pieces)]).unsqueeze(0).to(self.device)
+        num_opponent_pieces_tensor = torch.FloatTensor([len(self.env.blue_pieces)]).unsqueeze(0).to(self.device)
+        features_tensor = torch.FloatTensor([]).unsqueeze(0).to(self.device)
+
+        # Policy update
+        policy_loss = self.policy_loss(states, actions.squeeze(), rewards, prob_matrix, turn_tensor, num_own_pieces_tensor, num_opponent_pieces_tensor, features_tensor)
         self.policy_value_optimizer.zero_grad()
         policy_loss.backward()
         self.policy_value_optimizer.step()
+
+    def policy_loss(self, states, actions, rewards, prob_matrix, turn, num_own_pieces, num_opponent_pieces, features):
+        log_probs = torch.log(self.policy_value_net(states, prob_matrix, turn, num_own_pieces, num_opponent_pieces, features)[0])
+        selected_log_probs = rewards * log_probs[range(len(actions)), actions]
+        loss = -selected_log_probs.mean()
+        return loss
 
     def replicator_dynamics_update(self, pi, q_values, learning_rate=0.01):
         if len(pi) != len(q_values):
@@ -509,11 +526,6 @@ class DQNAgent:
         new_pi /= new_pi.sum()
         return new_pi
     
-    def policy_loss(self, states, actions, rewards):
-        log_probs = torch.log(self.policy_value_net(states)[0])
-        selected_log_probs = rewards * log_probs[np.arange(len(actions)), actions]
-        loss = -selected_log_probs.mean()
-        return loss
 
     def soft_update(self, local_model, target_model, tau):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
@@ -532,7 +544,6 @@ class DQNAgent:
         policy[policy < threshold] = 0
         policy /= policy.sum()
         return policy
-
 class PrioritizedReplayBuffer:
     def __init__(self, action_size, buffer_size, batch_size, seed, alpha=0.6, beta_start=0.4, beta_frames=100000):
         self.action_size = action_size
@@ -548,10 +559,17 @@ class PrioritizedReplayBuffer:
         self.epsilon = 1e-6
 
     def add(self, state, action, reward, next_state, done):
+        state = state.clone().detach().to(device).float()
+        next_state = torch.tensor(next_state, dtype=torch.float32).clone().detach().to(device)
+        action = torch.tensor(action, dtype=torch.long).clone().detach().to(device)
+        reward = torch.tensor(reward, dtype=torch.float32).clone().detach().to(device)
+        done = torch.tensor(done, dtype=torch.float32).clone().detach().to(device)
+        
         e = self.experience(state, action, reward, next_state, done)
         max_priority = max(self.priorities, default=1.0)
         self.memory.append(e)
         self.priorities.append(max_priority)
+
 
     def sample(self):
         self.frame += 1
@@ -569,11 +587,11 @@ class PrioritizedReplayBuffer:
         weights /= weights.max()
         weights = torch.tensor(weights, device=device, dtype=torch.float32)
 
-        states = torch.tensor(np.array([e.state for e in experiences]), device=device, dtype=torch.float32)
-        actions = torch.tensor(np.array([e.action for e in experiences]), device=device, dtype=torch.long).unsqueeze(1)
-        rewards = torch.tensor(np.array([e.reward for e in experiences]), device=device, dtype=torch.float32).unsqueeze(1)
-        next_states = torch.tensor(np.array([e.next_state for e in experiences]), device=device, dtype=torch.float32)
-        dones = torch.tensor(np.array([e.done for e in experiences]), device=device, dtype=torch.float32).unsqueeze(1)
+        states = torch.stack([e.state for e in experiences]).to(device)
+        actions = torch.stack([e.action for e in experiences]).to(device)
+        rewards = torch.stack([e.reward for e in experiences]).to(device)
+        next_states = torch.stack([e.next_state for e in experiences]).to(device)
+        dones = torch.stack([e.done for e in experiences]).to(device)
 
         return (states, actions, rewards, next_states, dones, indices, weights)
 

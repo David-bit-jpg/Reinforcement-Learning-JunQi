@@ -137,14 +137,10 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
                 pbar.set_postfix({'Red Reward': red_episode_reward, 'Blue Reward': blue_episode_reward, 'Epsilon': eps})
                 pbar.update(1)
 
-                # 每100步可视化推理棋盘
-                # if t % 100 == 0:
-                # env_model.visualize_inferred_board(player_color=current_player)
                 # 检查是否有战斗发生并记录战斗信息
                 if 'battle_info' in info:
                     battle_info = info['battle_info']
                     last_move = (current_agent.get_piece_by_index(action // (env_model.board_rows * env_model.board_cols)), (action // env_model.board_cols % env_model.board_rows, action % env_model.board_cols), next_state)
-                    # env_model.visualize_full_board(last_move=last_move, battle_info=battle_info)
                     battle_info = None  # 重置战斗信息
 
                 # 检查是否有玩家获胜
@@ -184,12 +180,11 @@ def train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsi
 
     return agent_red, agent_blue
 
-# 训练代理
-num_episodes = 3000
+num_episodes = 1000
 max_t = 100
 epsilon_start = 1.0
 epsilon_end = 0.01
-epsilon_decay = 0.995
+epsilon_decay = 0.99
 print("starting!!!!!!!!!!!!!")
 trained_agent_red, trained_agent_blue = train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay)
 torch.save(trained_agent_red.qnetwork_local.state_dict(), '/code/军棋/models/game_agent_with_inference_model.pth')

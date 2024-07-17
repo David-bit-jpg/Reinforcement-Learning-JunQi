@@ -175,18 +175,13 @@ class DQNAgent:
     def replay(self):
         if len(self.memory) < self.batch_size:
             return None
-        tree_idx, minibatch, ISWeights = self.memory.sample(self.batch_size)
-        states = np.array([self.get_board_state(x[0]) for x in minibatch])
-        actions = np.array([x[1] for x in minibatch])
-        rewards = np.array([x[2] for x in minibatch])
-        next_states = np.array([self.get_board_state(x[3]) for x in minibatch])
-        dones = np.array([x[4] for x in minibatch])
+        tree_idx, minibatch, ISWeights = self.memory.sample()
+        states = minibatch[0]
+        actions = minibatch[1]
+        rewards = minibatch[2]
+        next_states = minibatch[3]
+        dones = minibatch[4]
 
-        states = torch.tensor(states, dtype=torch.float32).to(device)
-        next_states = torch.tensor(next_states, dtype=torch.float32).to(device)
-        actions = torch.tensor(actions, dtype=torch.int64).to(device)
-        rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
-        dones = torch.tensor(dones, dtype=torch.float32).to(device)
         actions = torch.clamp(actions, 0, self.model.fc3.out_features - 1)
 
         q_values = self.model(states).gather(1, actions.unsqueeze(-1)).squeeze(-1)
@@ -207,7 +202,7 @@ class DQNAgent:
             self.epsilon *= self.epsilon_decay
 
         return loss.item()
-
+    
     def load(self, name):
         self.model.load_state_dict(torch.load(name))
 
