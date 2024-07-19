@@ -38,7 +38,6 @@ piece_encoding = {
 }
 class JunQiEnvGame(gym.Env):
     metadata = {'render.modes': ['human']}
-    
     def __init__(self, initial_board, input_size, hidden_size, output_size, lr=0.001):
         super(JunQiEnvGame, self).__init__()
         self.board_rows = 13
@@ -46,43 +45,28 @@ class JunQiEnvGame(gym.Env):
         self.railways = self.define_railways()
         self.roads = self.define_roads()
         self.highways = self.define_highways()
-        self.occupied_positions_red = set()
-        self.occupied_positions_blue = set()
-        self.red_pieces, self.blue_pieces = self.create_pieces(initial_board)
+        self.red_pieces = []
+        self.blue_pieces = []
+        self.piece_types = list(piece_encoding.keys())  # 添加piece_types属性
+        self.initial_board = initial_board
+        self.set_initial_pieces(initial_board)  # 确保在初始化时调用
         self.reward_model = RewardModel(self.red_pieces, self.blue_pieces, self)
         self.action_space = spaces.Discrete(len(self.red_pieces) * self.board_rows * self.board_cols)
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.board_rows, self.board_cols, 3), dtype=np.float32)
         self.pi = None
         self.pi_reg = None
-        self.initial_board = initial_board
-        self.piece_types = list(piece_encoding.keys())
         self.device = device
         self.model = self.load_inference_model('/code/军棋/models/infer_model.pth')
-
         self.move_history = []
         self.battle_history = []
         self.red_commander_dead = False
         self.blue_commander_dead = False
-
         self.reset()
-            
-    def load_inference_model(self, model_path):
-        # 定义推理模型的架构和初始化
-        model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys())).to(device)
-        model.load_state_dict(torch.load(model_path, map_location=device))  # 确保权重加载到正确的设备上
-        model.to(device)  # 确保模型移动到GPU
-        model.eval()
 
-        # 定义目标模型
-        target_model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys())).to(device)
-        target_model.load_state_dict(model.state_dict())
-        target_model.to(device)  # 确保目标模型移动到GPU
-        target_model.eval()
-
-        # 创建 DQNAgent 实例
-        action_size = len(self.red_pieces) * self.board_rows * self.board_cols
-        agent = DQNAgentInfer(model=model, target_model=target_model, action_size=action_size, initial_board=self.initial_board)
-        return agent
+    def set_initial_pieces(self, initial_board):
+        self.red_pieces, self.blue_pieces = initial_board
+        self.occupied_positions_red = set(piece.get_position() for piece in self.red_pieces if piece.get_position())
+        self.occupied_positions_blue = set(piece.get_position() for piece in self.blue_pieces if piece.get_position())
 
     def reset(self):
         self.board = np.zeros((self.board_rows, self.board_cols))
@@ -103,6 +87,24 @@ class JunQiEnvGame(gym.Env):
         self.red_commander_dead = False
         self.blue_commander_dead = False
         return self.get_state()
+            
+    def load_inference_model(self, model_path):
+        # 定义推理模型的架构和初始化
+        model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys())).to(device)
+        model.load_state_dict(torch.load(model_path, map_location=device))  # 确保权重加载到正确的设备上
+        model.to(device)  # 确保模型移动到GPU
+        model.eval()
+
+        # 定义目标模型
+        target_model = DoubleDQN(board_rows=13, board_cols=5, piece_types=list(piece_encoding.keys())).to(device)
+        target_model.load_state_dict(model.state_dict())
+        target_model.to(device)  # 确保目标模型移动到GPU
+        target_model.eval()
+
+        # 创建 DQNAgent 实例
+        action_size = len(self.red_pieces) * self.board_rows * self.board_cols
+        agent = DQNAgentInfer(model=model, target_model=target_model, action_size=action_size, initial_board=self.initial_board)
+        return agent
 
     def get_state(self):
         state = np.zeros((self.board_rows, self.board_cols, 3))
@@ -144,6 +146,11 @@ class JunQiEnvGame(gym.Env):
         player_color, piece, target_position = self.decode_action(action)
         if piece.get_color() != current_player_color:
             logging.warning(f"Invalid action: In turn {self.turn}, it's {current_player_color}'s turn, but the piece is {piece.get_color()} {piece.get_name()}.")
+            return self.get_state(), -1, True, {}  # 返回一个负奖励并结束该回合
+        valid_moves = self.get_valid_moves(piece)
+        if target_position not in valid_moves:
+            print("INVALID")
+            logging.warning(f"Invalid move: In turn {self.turn}, {piece.get_name()} at {piece.get_position()} cannot move to {target_position}.")
             return self.get_state(), -1, True, {}  # 返回一个负奖励并结束该回合
         initial_state = self.get_state()
 
