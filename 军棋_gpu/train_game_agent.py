@@ -208,4 +208,5 @@ epsilon_decay = 0.99
 
 print("Starting training...")
 trained_agent_red, trained_agent_blue = train_agents(agent_red, agent_blue, num_episodes, max_t, epsilon_start, epsilon_end, epsilon_decay)
-torch.save(trained_agent_red.qnetwork_local.state_dict(), '/code/军棋/models/game_agent_with_inference_model.pth')
+torch.save(trained_agent_red.qnetwork_local.state_dict(), '/code/军棋/models/game_agent_with_inference_model_red.pth')
+torch.save(trained_agent_blue.qnetwork_local.state_dict(), '/code/军棋/models/game_agent_with_inference_model_blue.pth')
