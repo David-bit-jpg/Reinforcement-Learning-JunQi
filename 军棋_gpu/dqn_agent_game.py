@@ -612,6 +612,7 @@ class PrioritizedReplayBuffer:
     def sample(self):
         if len(self.memory) == 0:
             return None
+
         priorities = np.array(self.priorities, dtype=np.float32)
         priorities = priorities ** self.alpha
         probabilities = priorities / priorities.sum()
@@ -622,6 +623,14 @@ class PrioritizedReplayBuffer:
         weights /= weights.max()
 
         states, actions, rewards, next_states, dones = zip(*samples)
+
+        # 确保 actions 不为 None
+        valid_samples = [(s, a, r, ns, d) for s, a, r, ns, d in zip(states, actions, rewards, next_states, dones) if a is not None]
+        if len(valid_samples) == 0:
+            return None
+
+        states, actions, rewards, next_states, dones = zip(*valid_samples)
+
         return (
             torch.stack([s for s in states], dim=0).to(device),
             torch.tensor(actions, device=device, dtype=torch.long).unsqueeze(1),
@@ -631,6 +640,8 @@ class PrioritizedReplayBuffer:
             indices,
             torch.tensor(weights, device=device, dtype=torch.float32).unsqueeze(1)
         )
+
+
 
     def update_priorities(self, batch_indices, batch_priorities):
         for idx, priority in zip(batch_indices, batch_priorities):

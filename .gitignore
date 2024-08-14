@@ -99,3 +99,4 @@ llama-微调/sentence-transformers/all-MiniLM-L6-v2/tokenizer_config.json
 llama-微调/sentence-transformers/all-MiniLM-L6-v2/vocab.txt
 llama-微调/微调.py
 军棋_cpu.zip
+军棋_gpu_colab/models/setup_model.pth
